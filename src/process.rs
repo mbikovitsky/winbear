@@ -1,4 +1,4 @@
-use std::{array::IntoIter, convert::TryInto, error::Error, process::Command};
+use std::{convert::TryInto, error::Error};
 
 use bindings::Windows::Win32::System::{
     SystemServices::HANDLE,
@@ -9,6 +9,13 @@ use bindings::Windows::Win32::System::{
 #[derive(Debug)]
 pub struct Process {
     handle: HANDLE,
+    process_id: u32,
+}
+
+impl Process {
+    pub fn process_id(&self) -> u32 {
+        self.process_id
+    }
 }
 
 impl Drop for Process {
@@ -116,6 +123,7 @@ impl ProcessCreator {
 
             Ok(Process {
                 handle: process_info.hProcess,
+                process_id: process_info.dwProcessId,
             })
         }
     }
