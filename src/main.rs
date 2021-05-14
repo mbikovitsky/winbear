@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate static_assertions;
+
 use std::error::Error;
 
 use debugger::wait_for_debug_event;

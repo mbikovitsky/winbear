@@ -9,3 +9,5 @@ edition = "2018"
 [dependencies]
 bindings = { path = "bindings" }
 windows = "0.10.0"
+
+static_assertions = "1.1.0"
