@@ -4,6 +4,7 @@ fn main() {
             OpenProcess,
             CreateProcessW,
             GetCurrentProcessId,
+            GetCurrentProcess,
             TerminateProcess,
 
             DEBUG_PROCESS,
@@ -41,6 +42,7 @@ fn main() {
             GetModuleHandleW,
             GetProcAddress,
             NtQueryInformationProcess,
+            IsWow64Process,
 
             DBG_CONTINUE,
             DBG_EXCEPTION_NOT_HANDLED,

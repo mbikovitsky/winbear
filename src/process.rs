@@ -16,10 +16,13 @@ use crate::util::{HRESULT_FROM_NT, NT_SUCCESS};
 use crate::util::get_ntdll_export;
 
 #[cfg(target_pointer_width = "32")]
-use bindings::Windows::Win32::System::SystemServices::FARPROC;
+use bindings::Windows::Win32::System::SystemServices::{IsWow64Process, FARPROC};
 
 #[cfg(target_pointer_width = "32")]
 use bindings::Windows::Win32::System::WindowsProgramming::PROCESSINFOCLASS;
+
+#[cfg(target_pointer_width = "32")]
+use bindings::Windows::Win32::System::Threading::GetCurrentProcess;
 
 #[derive(Debug)]
 pub struct Process {
@@ -28,6 +31,20 @@ pub struct Process {
 }
 
 impl Process {
+    pub fn is_system_32_bit() -> windows::Result<bool> {
+        #[cfg(target_pointer_width = "64")]
+        {
+            return Ok(false);
+        }
+
+        #[cfg(target_pointer_width = "32")]
+        unsafe {
+            let mut result = false.into();
+            IsWow64Process(GetCurrentProcess(), &mut result).ok()?;
+            return Ok(!result.as_bool());
+        }
+    }
+
     pub fn open(process_id: u32, access: PROCESS_ACCESS_RIGHTS) -> windows::Result<Self> {
         unsafe {
             let handle = OpenProcess(access, false, process_id);
@@ -81,14 +98,15 @@ impl Process {
     fn native_peb(&self) -> windows::Result<NativePeb> {
         let peb_address = self.native_peb_address()?;
 
-        #[cfg(target_pointer_width = "64")]
-        {
+        if Self::is_system_32_bit()? {
+            unsafe {
+                return Ok(NativePeb::Peb32(self.read_struct(peb_address)?));
+            }
+        } else {
             unsafe {
                 return Ok(NativePeb::Peb64(self.read_struct(peb_address)?));
             }
         }
-
-        todo!("32-bit");
     }
 
     fn native_peb_address(&self) -> windows::Result<u64> {
@@ -608,6 +626,35 @@ mod tests {
         let nt_system_root = String::from_utf16(&nt_system_root).unwrap();
         let nt_system_root = nt_system_root.trim_end_matches('\0');
         assert_eq!("C:\\Windows".to_lowercase(), nt_system_root.to_lowercase());
+
+        process.terminate(-1 as _).unwrap();
+    }
+
+    #[test]
+    fn command_line_same_bitness() {
+        test_command_line("C:\\Windows\\System32\\notepad.exe")
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn command_line_64_32() {
+        test_command_line("C:\\Windows\\SysWOW64\\notepad.exe")
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn command_line_32_64() {
+        test_command_line("C:\\Windows\\SysNative\\notepad.exe")
+    }
+
+    fn test_command_line(command_line: &str) {
+        let process = ProcessCreator::new_with_command_line(command_line)
+            .create()
+            .unwrap();
+
+        let read_command_line = process.command_line().unwrap();
+
+        assert_eq!(read_command_line, command_line);
 
         process.terminate(-1 as _).unwrap();
     }
