@@ -1,19 +1,14 @@
 #[macro_use]
 extern crate static_assertions;
 
-#[macro_use]
-extern crate lazy_static;
-
 use std::error::Error;
 
-use debugger::wait_for_debug_event;
-use debugger::DebugEventInfo;
+use debugger::{wait_for_debug_event, DebugEventInfo};
 use process::ProcessCreator;
 use wmi::Wmi;
 
 mod debugger;
 mod process;
-mod util;
 mod wmi;
 
 fn main() -> Result<(), Box<dyn Error>> {
