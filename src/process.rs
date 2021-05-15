@@ -1,12 +1,12 @@
 use std::{convert::TryInto, error::Error, ffi::c_void};
 
 use bindings::Windows::Win32::System::{
-    SystemServices::{HANDLE, NTSTATUS},
+    SystemServices::{NtQueryInformationProcess, HANDLE, NTSTATUS},
     Threading::{
         CreateProcessW, GetCurrentProcessId, OpenProcess, TerminateProcess, DEBUG_PROCESS,
         PROCESS_ACCESS_RIGHTS, PROCESS_CREATION_FLAGS, STARTUPINFOW,
     },
-    WindowsProgramming::CloseHandle,
+    WindowsProgramming::{CloseHandle, ProcessBasicInformation, PROCESS_BASIC_INFORMATION},
 };
 use windows::HRESULT;
 
@@ -17,6 +17,9 @@ use crate::util::get_ntdll_export;
 
 #[cfg(target_pointer_width = "32")]
 use bindings::Windows::Win32::System::SystemServices::FARPROC;
+
+#[cfg(target_pointer_width = "32")]
+use bindings::Windows::Win32::System::WindowsProgramming::PROCESSINFOCLASS;
 
 #[derive(Debug)]
 pub struct Process {
@@ -42,6 +45,61 @@ impl Process {
 
     pub fn terminate(&self, exit_code: u32) -> windows::Result<()> {
         unsafe { TerminateProcess(self.handle, exit_code).ok() }
+    }
+
+    fn native_peb_address(&self) -> windows::Result<u64> {
+        #[cfg(target_pointer_width = "32")]
+        {
+            lazy_static! {
+                static ref WOW64_QUERY_INFO: Option<PFN_NtQueryInformationProcess> =
+                    get_ntdll_export("NtWow64QueryInformationProcess64").map_or(
+                        None,
+                        |function| unsafe {
+                            Some(
+                                std::mem::transmute::<FARPROC, PFN_NtQueryInformationProcess>(
+                                    function,
+                                ),
+                            )
+                        }
+                    );
+            }
+
+            if let Some(function) = *WOW64_QUERY_INFO {
+                unsafe {
+                    let mut info = PROCESS_BASIC_INFORMATION64::default();
+                    let mut return_length = 0;
+                    let status = function(
+                        self.handle,
+                        ProcessBasicInformation,
+                        &mut info as *mut _ as _,
+                        std::mem::size_of_val(&info).try_into().unwrap(),
+                        &mut return_length,
+                    );
+                    if !NT_SUCCESS(status) {
+                        return Err(windows::Error::from(HRESULT_FROM_NT(status)));
+                    }
+
+                    return Ok(info.PebBaseAddress);
+                }
+            }
+        }
+
+        unsafe {
+            let mut info = PROCESS_BASIC_INFORMATION::default();
+            let mut return_length = 0;
+            let status = NtQueryInformationProcess(
+                self.handle,
+                ProcessBasicInformation,
+                &mut info as *mut _ as _,
+                std::mem::size_of_val(&info).try_into().unwrap(),
+                &mut return_length,
+            );
+            if !NT_SUCCESS(status) {
+                return Err(windows::Error::from(HRESULT_FROM_NT(status)));
+            }
+
+            Ok((info.PebBaseAddress as usize).try_into().unwrap())
+        }
     }
 
     pub fn read_memory(&self, base_address: u64, buffer: &mut [u8]) -> windows::Result<()> {
@@ -159,6 +217,15 @@ type PFN_NtWow64ReadVirtualMemory64 = unsafe extern "system" fn(
     ReturnLength: *mut u64,
 ) -> NTSTATUS;
 
+#[cfg(target_pointer_width = "32")]
+type PFN_NtQueryInformationProcess = unsafe extern "system" fn(
+    ProcessHandle: HANDLE,
+    ProcessInformationClass: PROCESSINFOCLASS,
+    ProcessInformation: *mut c_void,
+    ProcessInformationLength: u32,
+    ReturnLength: *mut u32,
+) -> NTSTATUS;
+
 extern "system" {
     #[link(name = "ntdll")]
     fn NtReadVirtualMemory(
@@ -176,6 +243,18 @@ pub struct ProcessCreator {
     inherit_handles: bool,
     flags: PROCESS_CREATION_FLAGS,
     current_directory: Option<String>,
+}
+
+#[cfg(target_pointer_width = "32")]
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+struct PROCESS_BASIC_INFORMATION64 {
+    pub ExitStatus: NTSTATUS,
+    pub PebBaseAddress: u64,
+    pub AffinityMask: u64,
+    pub BasePriority: u32,
+    pub UniqueProcessId: u64,
+    pub InheritedFromUniqueProcessId: u64,
 }
 
 impl ProcessCreator {

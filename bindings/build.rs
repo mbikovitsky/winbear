@@ -14,6 +14,10 @@ fn main() {
             CloseHandle,
 
             INFINITE,
+            ProcessBasicInformation,
+
+            PROCESS_BASIC_INFORMATION,
+            PROCESSINFOCLASS,
         },
 
         Windows::Win32::System::Diagnostics::Debug::{
@@ -36,6 +40,8 @@ fn main() {
         Windows::Win32::System::SystemServices::{
             GetModuleHandleW,
             GetProcAddress,
+            NtQueryInformationProcess,
+
             DBG_CONTINUE,
             DBG_EXCEPTION_NOT_HANDLED,
 
