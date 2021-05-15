@@ -22,16 +22,16 @@ pub struct DebugEvent {
 assert_not_impl_any!(DebugEvent: Send, Sync);
 
 impl DebugEvent {
-    pub fn continue_handled(self) -> windows::Result<()> {
-        unsafe { ContinueDebugEvent(self.process_id, self.thread_id, DBG_CONTINUE.0 as _).ok() }
-    }
-
-    pub fn continue_unhandled(self) -> windows::Result<()> {
+    pub fn continue_event(self, handled: bool) -> windows::Result<()> {
         unsafe {
             ContinueDebugEvent(
                 self.process_id,
                 self.thread_id,
-                DBG_EXCEPTION_NOT_HANDLED.0 as _,
+                if handled {
+                    DBG_CONTINUE.0 as _
+                } else {
+                    DBG_EXCEPTION_NOT_HANDLED.0 as _
+                },
             )
             .ok()
         }
