@@ -361,6 +361,19 @@ struct UNICODE_STRING64 {
     pub Buffer: u64,
 }
 
+#[cfg(target_pointer_width = "32")]
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+#[allow(non_snake_case)]
+struct PROCESS_BASIC_INFORMATION64 {
+    pub ExitStatus: NTSTATUS,
+    pub PebBaseAddress: u64,
+    pub AffinityMask: u64,
+    pub BasePriority: u32,
+    pub UniqueProcessId: u64,
+    pub InheritedFromUniqueProcessId: u64,
+}
+
 #[allow(non_camel_case_types)]
 type FN_NtReadVirtualMemory = unsafe extern "system" fn(
     ProcessHandle: HANDLE,
@@ -407,19 +420,6 @@ pub struct ProcessCreator {
     inherit_handles: bool,
     flags: PROCESS_CREATION_FLAGS,
     current_directory: Option<String>,
-}
-
-#[cfg(target_pointer_width = "32")]
-#[derive(Debug, Default, Clone, Copy)]
-#[repr(C)]
-#[allow(non_snake_case)]
-struct PROCESS_BASIC_INFORMATION64 {
-    pub ExitStatus: NTSTATUS,
-    pub PebBaseAddress: u64,
-    pub AffinityMask: u64,
-    pub BasePriority: u32,
-    pub UniqueProcessId: u64,
-    pub InheritedFromUniqueProcessId: u64,
 }
 
 impl ProcessCreator {
