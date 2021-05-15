@@ -223,7 +223,9 @@ impl ReadVirtualMemory {
                         buffer.len(),
                         &mut returned,
                     );
-                    assert_eq!(returned, buffer.len());
+                    if NT_SUCCESS(status) {
+                        assert_eq!(returned, buffer.len());
+                    }
                     return status;
                 }
                 #[cfg(target_pointer_width = "32")]
@@ -236,7 +238,9 @@ impl ReadVirtualMemory {
                         buffer.len().try_into().unwrap(),
                         &mut returned,
                     );
-                    assert_eq!(returned, buffer.len().try_into().unwrap());
+                    if NT_SUCCESS(status) {
+                        assert_eq!(returned, buffer.len().try_into().unwrap());
+                    }
                     return status;
                 }
             };
