@@ -22,6 +22,7 @@ fn main() {
         },
 
         Windows::Win32::System::Diagnostics::Debug::{
+            GetLastError,
             WaitForDebugEvent,
             ContinueDebugEvent,
 
@@ -36,12 +37,14 @@ fn main() {
             UNLOAD_DLL_DEBUG_EVENT,
             OUTPUT_DEBUG_STRING_EVENT,
             RIP_EVENT,
+            ERROR_INSUFFICIENT_BUFFER,
         },
 
         Windows::Win32::System::SystemServices::{
             GetModuleHandleW,
             GetProcAddress,
             NtQueryInformationProcess,
+            QueryFullProcessImageNameW,
             IsWow64Process,
 
             DBG_CONTINUE,

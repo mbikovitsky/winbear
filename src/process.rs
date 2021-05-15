@@ -1,7 +1,11 @@
 use std::{convert::TryInto, error::Error, ffi::c_void};
 
 use bindings::Windows::Win32::System::{
-    SystemServices::{NtQueryInformationProcess, HANDLE, NTSTATUS},
+    Diagnostics::Debug::{GetLastError, ERROR_INSUFFICIENT_BUFFER},
+    SystemServices::{
+        NtQueryInformationProcess, QueryFullProcessImageNameW, HANDLE, NTSTATUS,
+        PROCESS_NAME_FORMAT, PWSTR,
+    },
     Threading::{
         CreateProcessW, GetCurrentProcessId, OpenProcess, TerminateProcess, DEBUG_PROCESS,
         PROCESS_ACCESS_RIGHTS, PROCESS_CREATION_FLAGS, STARTUPINFOW,
@@ -62,6 +66,34 @@ impl Process {
 
     pub fn terminate(&self, exit_code: u32) -> windows::Result<()> {
         unsafe { TerminateProcess(self.handle, exit_code).ok() }
+    }
+
+    pub fn image_name(&self) -> Result<String, Box<dyn Error>> {
+        let mut result = vec![0];
+        loop {
+            unsafe {
+                let mut size: u32 = result.len().try_into().unwrap();
+                let success = QueryFullProcessImageNameW(
+                    self.handle,
+                    PROCESS_NAME_FORMAT(0),
+                    PWSTR(result.as_mut_ptr()),
+                    &mut size,
+                );
+                let error = GetLastError();
+                if !success.as_bool() && error != ERROR_INSUFFICIENT_BUFFER {
+                    return Err(windows::Error::from(HRESULT::from_win32(error.0)))?;
+                }
+
+                if success.as_bool() {
+                    let name = result.as_slice();
+                    let name = &name[..size as usize];
+                    let name = String::from_utf16(name)?;
+                    return Ok(name);
+                }
+
+                result.resize(result.len() * 2, 0);
+            }
+        }
     }
 
     pub fn command_line(&self) -> Result<String, Box<dyn Error>> {
