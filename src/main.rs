@@ -9,10 +9,12 @@ use std::error::Error;
 use debugger::wait_for_debug_event;
 use debugger::DebugEventInfo;
 use process::ProcessCreator;
+use wmi::Wmi;
 
 mod debugger;
 mod process;
 mod util;
+mod wmi;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
@@ -36,4 +38,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+fn get_process_command_line(wmi: &Wmi, process_id: u32) -> windows::Result<Option<String>> {
+    const E_NOTFOUND: windows::HRESULT = windows::HRESULT(0x8000100D);
+
+    Ok(wmi
+        .exec_query(format!(
+            "select CommandLine from Win32_Process where ProcessId = {}",
+            process_id
+        ))?
+        .nth(0)
+        .ok_or(windows::Error::from(E_NOTFOUND))??
+        .get("CommandLine")?
+        .get_string())
 }

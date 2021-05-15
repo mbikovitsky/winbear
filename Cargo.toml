@@ -12,3 +12,4 @@ windows = "0.10.0"
 
 static_assertions = "1.1.0"
 lazy_static = "1.4.0"
+widestring = "0.4.3"
