@@ -10,7 +10,7 @@ use bindings::Windows::Win32::System::{
 };
 use windows::HRESULT;
 
-use crate::util::{HRESULT_FROM_NT, NT_SUCCESS};
+use crate::util::{hresult_from_nt, nt_success};
 
 #[cfg(target_pointer_width = "32")]
 use crate::util::get_ntdll_export;
@@ -113,12 +113,12 @@ impl Process {
         #[cfg(target_pointer_width = "32")]
         {
             lazy_static! {
-                static ref WOW64_QUERY_INFO: Option<PFN_NtQueryInformationProcess> =
+                static ref WOW64_QUERY_INFO: Option<FN_NtQueryInformationProcess> =
                     get_ntdll_export("NtWow64QueryInformationProcess64").map_or(
                         None,
                         |function| unsafe {
                             Some(
-                                std::mem::transmute::<FARPROC, PFN_NtQueryInformationProcess>(
+                                std::mem::transmute::<FARPROC, FN_NtQueryInformationProcess>(
                                     function,
                                 ),
                             )
@@ -137,8 +137,8 @@ impl Process {
                         std::mem::size_of_val(&info).try_into().unwrap(),
                         &mut return_length,
                     );
-                    if !NT_SUCCESS(status) {
-                        return Err(windows::Error::from(HRESULT_FROM_NT(status)));
+                    if !nt_success(status) {
+                        return Err(windows::Error::from(hresult_from_nt(status)));
                     }
 
                     return Ok(info.PebBaseAddress);
@@ -156,8 +156,8 @@ impl Process {
                 std::mem::size_of_val(&info).try_into().unwrap(),
                 &mut return_length,
             );
-            if !NT_SUCCESS(status) {
-                return Err(windows::Error::from(HRESULT_FROM_NT(status)));
+            if !nt_success(status) {
+                return Err(windows::Error::from(hresult_from_nt(status)));
             }
 
             Ok((info.PebBaseAddress as usize).try_into().unwrap())
@@ -170,8 +170,8 @@ impl Process {
         }
 
         let status = READ_FN.invoke(self.handle, base_address, buffer);
-        if !NT_SUCCESS(status) {
-            return Err(windows::Error::from(HRESULT_FROM_NT(status)));
+        if !nt_success(status) {
+            return Err(windows::Error::from(hresult_from_nt(status)));
         }
 
         Ok(())
@@ -202,10 +202,10 @@ impl Drop for Process {
 
 #[derive(Clone, Copy)]
 enum ReadVirtualMemory {
-    Local(PFN_NtReadVirtualMemory),
+    Local(FN_NtReadVirtualMemory),
 
     #[cfg(target_pointer_width = "32")]
-    Native(PFN_NtWow64ReadVirtualMemory64),
+    Native(FN_NtWow64ReadVirtualMemory64),
 }
 
 impl ReadVirtualMemory {
@@ -218,7 +218,7 @@ impl ReadVirtualMemory {
             }
 
             let read_fn =
-                std::mem::transmute::<FARPROC, PFN_NtWow64ReadVirtualMemory64>(read_fn.unwrap());
+                std::mem::transmute::<FARPROC, FN_NtWow64ReadVirtualMemory64>(read_fn.unwrap());
 
             Self::Native(read_fn)
         }
@@ -241,7 +241,7 @@ impl ReadVirtualMemory {
                         buffer.len(),
                         &mut returned,
                     );
-                    if NT_SUCCESS(status) {
+                    if nt_success(status) {
                         assert_eq!(returned, buffer.len());
                     }
                     return status;
@@ -256,7 +256,7 @@ impl ReadVirtualMemory {
                         buffer.len().try_into().unwrap(),
                         &mut returned,
                     );
-                    if NT_SUCCESS(status) {
+                    if nt_success(status) {
                         assert_eq!(returned, buffer.len().try_into().unwrap());
                     }
                     return status;
@@ -273,6 +273,7 @@ enum NativePeb {
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
+#[allow(non_snake_case)]
 struct PEB32 {
     pub Reserved1: [u8; 2],
     pub BeingDebugged: u8,
@@ -303,6 +304,7 @@ impl Default for PEB32 {
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
+#[allow(non_snake_case)]
 struct PEB64 {
     pub Reserved1: [u8; 2],
     pub BeingDebugged: u8,
@@ -323,6 +325,7 @@ impl Default for PEB64 {
 
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
+#[allow(non_snake_case)]
 struct RTL_USER_PROCESS_PARAMETERS32 {
     pub Reserved1: [u8; 16],
     pub Reserved2: [u32; 10],
@@ -332,6 +335,7 @@ struct RTL_USER_PROCESS_PARAMETERS32 {
 
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
+#[allow(non_snake_case)]
 struct RTL_USER_PROCESS_PARAMETERS64 {
     pub Reserved1: [u8; 16],
     pub Reserved2: [u64; 10],
@@ -341,6 +345,7 @@ struct RTL_USER_PROCESS_PARAMETERS64 {
 
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
+#[allow(non_snake_case)]
 struct UNICODE_STRING32 {
     pub Length: u16,
     pub MaximumLength: u16,
@@ -349,13 +354,15 @@ struct UNICODE_STRING32 {
 
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
+#[allow(non_snake_case)]
 struct UNICODE_STRING64 {
     pub Length: u16,
     pub MaximumLength: u16,
     pub Buffer: u64,
 }
 
-type PFN_NtReadVirtualMemory = unsafe extern "system" fn(
+#[allow(non_camel_case_types)]
+type FN_NtReadVirtualMemory = unsafe extern "system" fn(
     ProcessHandle: HANDLE,
     BaseAddress: usize,
     Buffer: *mut c_void,
@@ -364,7 +371,8 @@ type PFN_NtReadVirtualMemory = unsafe extern "system" fn(
 ) -> NTSTATUS;
 
 #[cfg(target_pointer_width = "32")]
-type PFN_NtWow64ReadVirtualMemory64 = unsafe extern "system" fn(
+#[allow(non_camel_case_types)]
+type FN_NtWow64ReadVirtualMemory64 = unsafe extern "system" fn(
     ProcessHandle: HANDLE,
     BaseAddress: u64,
     Buffer: *mut c_void,
@@ -373,7 +381,8 @@ type PFN_NtWow64ReadVirtualMemory64 = unsafe extern "system" fn(
 ) -> NTSTATUS;
 
 #[cfg(target_pointer_width = "32")]
-type PFN_NtQueryInformationProcess = unsafe extern "system" fn(
+#[allow(non_camel_case_types)]
+type FN_NtQueryInformationProcess = unsafe extern "system" fn(
     ProcessHandle: HANDLE,
     ProcessInformationClass: PROCESSINFOCLASS,
     ProcessInformation: *mut c_void,
@@ -403,6 +412,7 @@ pub struct ProcessCreator {
 #[cfg(target_pointer_width = "32")]
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
+#[allow(non_snake_case)]
 struct PROCESS_BASIC_INFORMATION64 {
     pub ExitStatus: NTSTATUS,
     pub PebBaseAddress: u64,

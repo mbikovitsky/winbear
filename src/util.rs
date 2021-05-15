@@ -4,15 +4,16 @@ use bindings::Windows::Win32::System::{
 };
 use windows::HRESULT;
 
-pub fn NT_SUCCESS(status: NTSTATUS) -> bool {
+pub fn nt_success(status: NTSTATUS) -> bool {
     status.0 >= 0
 }
 
-pub fn HRESULT_FROM_NT(status: NTSTATUS) -> HRESULT {
+pub fn hresult_from_nt(status: NTSTATUS) -> HRESULT {
     // https://docs.microsoft.com/en-us/windows/win32/api/winerror/nf-winerror-hresult_from_nt
     HRESULT(status.0 as u32 | FACILITY_NT_BIT.0)
 }
 
+#[allow(dead_code)]
 pub fn get_ntdll_export(name: impl AsRef<str>) -> windows::Result<FARPROC> {
     unsafe {
         let ntdll = GetModuleHandleW("ntdll.dll");
