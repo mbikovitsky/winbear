@@ -47,6 +47,50 @@ impl Process {
         unsafe { TerminateProcess(self.handle, exit_code).ok() }
     }
 
+    pub fn command_line(&self) -> Result<String, Box<dyn Error>> {
+        let peb = self.native_peb()?;
+
+        let (command_line_addr, command_line_size) = match peb {
+            NativePeb::Peb32(peb) => {
+                let params: RTL_USER_PROCESS_PARAMETERS32 =
+                    unsafe { self.read_struct(peb.ProcessParameters.into())? };
+
+                (params.CommandLine.Buffer.into(), params.CommandLine.Length)
+            }
+            NativePeb::Peb64(peb) => {
+                let params: RTL_USER_PROCESS_PARAMETERS64 =
+                    unsafe { self.read_struct(peb.ProcessParameters.into())? };
+
+                (params.CommandLine.Buffer, params.CommandLine.Length)
+            }
+        };
+
+        let mut command_line_bytes = vec![0; command_line_size.into()];
+        self.read_memory(command_line_addr.into(), &mut command_line_bytes)?;
+
+        let command_line_chars = unsafe {
+            std::slice::from_raw_parts::<u16>(
+                command_line_bytes.as_ptr() as _,
+                command_line_bytes.len() / std::mem::size_of::<u16>(),
+            )
+        };
+
+        Ok(String::from_utf16(command_line_chars)?)
+    }
+
+    fn native_peb(&self) -> windows::Result<NativePeb> {
+        let peb_address = self.native_peb_address()?;
+
+        #[cfg(target_pointer_width = "64")]
+        {
+            unsafe {
+                return Ok(NativePeb::Peb64(self.read_struct(peb_address)?));
+            }
+        }
+
+        todo!("32-bit");
+    }
+
     fn native_peb_address(&self) -> windows::Result<u64> {
         #[cfg(target_pointer_width = "32")]
         {
@@ -198,6 +242,95 @@ impl ReadVirtualMemory {
             };
         }
     }
+}
+
+enum NativePeb {
+    Peb32(PEB32),
+    Peb64(PEB64),
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+struct PEB32 {
+    pub Reserved1: [u8; 2],
+    pub BeingDebugged: u8,
+    pub Reserved2: [u8; 1],
+    pub Reserved3: [u32; 2],
+    pub Ldr: u32,
+    pub ProcessParameters: u32,
+    pub Reserved4: [u32; 3],
+    pub AtlThunkSListPtr: u32,
+    pub Reserved5: u32,
+    pub Reserved6: u32,
+    pub Reserved7: u32,
+    pub Reserved8: u32,
+    pub AtlThunkSListPtr32: u32,
+    pub Reserved9: [u32; 45],
+    pub Reserved10: [u8; 96],
+    pub PostProcessInitRoutine: u32,
+    pub Reserved11: [u8; 128],
+    pub Reserved12: [u32; 1],
+    pub SessionId: u32,
+}
+
+impl Default for PEB32 {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+struct PEB64 {
+    pub Reserved1: [u8; 2],
+    pub BeingDebugged: u8,
+    pub Reserved2: [u8; 21],
+    pub LoaderData: u64,
+    pub ProcessParameters: u64,
+    pub Reserved3: [u8; 520],
+    pub PostProcessInitRoutine: u64,
+    pub Reserved4: [u8; 136],
+    pub SessionId: u32,
+}
+
+impl Default for PEB64 {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+struct RTL_USER_PROCESS_PARAMETERS32 {
+    pub Reserved1: [u8; 16],
+    pub Reserved2: [u32; 10],
+    pub ImagePathName: UNICODE_STRING32,
+    pub CommandLine: UNICODE_STRING32,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+struct RTL_USER_PROCESS_PARAMETERS64 {
+    pub Reserved1: [u8; 16],
+    pub Reserved2: [u64; 10],
+    pub ImagePathName: UNICODE_STRING64,
+    pub CommandLine: UNICODE_STRING64,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+struct UNICODE_STRING32 {
+    pub Length: u16,
+    pub MaximumLength: u16,
+    pub Buffer: u32,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+struct UNICODE_STRING64 {
+    pub Length: u16,
+    pub MaximumLength: u16,
+    pub Buffer: u64,
 }
 
 type PFN_NtReadVirtualMemory = unsafe extern "system" fn(
