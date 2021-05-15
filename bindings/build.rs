@@ -1,18 +1,27 @@
 fn main() {
     windows::build!(
         Windows::Win32::System::Threading::{
+            OpenProcess,
             CreateProcessW,
+            GetCurrentProcessId,
+            TerminateProcess,
+
             DEBUG_PROCESS,
+            PROCESS_VM_READ,
         },
 
         Windows::Win32::System::WindowsProgramming::{
             CloseHandle,
+
             INFINITE,
         },
 
         Windows::Win32::System::Diagnostics::Debug::{
             WaitForDebugEvent,
             ContinueDebugEvent,
+
+            FACILITY_NT_BIT,
+
             EXCEPTION_DEBUG_EVENT,
             CREATE_THREAD_DEBUG_EVENT,
             CREATE_PROCESS_DEBUG_EVENT,
@@ -25,8 +34,12 @@ fn main() {
         },
 
         Windows::Win32::System::SystemServices::{
+            GetModuleHandleW,
+            GetProcAddress,
             DBG_CONTINUE,
             DBG_EXCEPTION_NOT_HANDLED,
+
+            NTSTATUS,
         },
     );
 }

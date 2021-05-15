@@ -1,10 +1,22 @@
-use std::{convert::TryInto, error::Error};
+use std::{convert::TryInto, error::Error, ffi::c_void};
 
 use bindings::Windows::Win32::System::{
-    SystemServices::HANDLE,
-    Threading::{CreateProcessW, DEBUG_PROCESS, PROCESS_CREATION_FLAGS, STARTUPINFOW},
+    SystemServices::{HANDLE, NTSTATUS},
+    Threading::{
+        CreateProcessW, GetCurrentProcessId, OpenProcess, TerminateProcess, DEBUG_PROCESS,
+        PROCESS_ACCESS_RIGHTS, PROCESS_CREATION_FLAGS, STARTUPINFOW,
+    },
     WindowsProgramming::CloseHandle,
 };
+use windows::HRESULT;
+
+use crate::util::{HRESULT_FROM_NT, NT_SUCCESS};
+
+#[cfg(target_pointer_width = "32")]
+use crate::util::get_ntdll_export;
+
+#[cfg(target_pointer_width = "32")]
+use bindings::Windows::Win32::System::SystemServices::FARPROC;
 
 #[derive(Debug)]
 pub struct Process {
@@ -13,6 +25,48 @@ pub struct Process {
 }
 
 impl Process {
+    pub fn open(process_id: u32, access: PROCESS_ACCESS_RIGHTS) -> windows::Result<Self> {
+        unsafe {
+            let handle = OpenProcess(access, false, process_id);
+            if handle.is_null() {
+                return Err(windows::Error::from(HRESULT::from_thread()));
+            }
+
+            Ok(Process { handle, process_id })
+        }
+    }
+
+    pub fn open_self(access: PROCESS_ACCESS_RIGHTS) -> windows::Result<Self> {
+        Self::open(unsafe { GetCurrentProcessId() }, access)
+    }
+
+    pub fn terminate(&self, exit_code: u32) -> windows::Result<()> {
+        unsafe { TerminateProcess(self.handle, exit_code).ok() }
+    }
+
+    pub fn read_memory(&self, base_address: u64, buffer: &mut [u8]) -> windows::Result<()> {
+        lazy_static! {
+            static ref READ_FN: ReadVirtualMemory = ReadVirtualMemory::get();
+        }
+
+        let status = READ_FN.invoke(self.handle, base_address, buffer);
+        if !NT_SUCCESS(status) {
+            return Err(windows::Error::from(HRESULT_FROM_NT(status)));
+        }
+
+        Ok(())
+    }
+
+    pub unsafe fn read_struct<T: Copy>(&self, base_address: u64) -> windows::Result<T> {
+        let mut buffer = vec![0; std::mem::size_of::<T>()];
+
+        self.read_memory(base_address, &mut buffer)?;
+
+        let ptr = buffer.as_ptr() as *const T;
+
+        Ok(ptr.read_unaligned())
+    }
+
     pub fn process_id(&self) -> u32 {
         self.process_id
     }
@@ -24,6 +78,96 @@ impl Drop for Process {
             CloseHandle(self.handle).ok().unwrap();
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum ReadVirtualMemory {
+    Local(PFN_NtReadVirtualMemory),
+
+    #[cfg(target_pointer_width = "32")]
+    Native(PFN_NtWow64ReadVirtualMemory64),
+}
+
+impl ReadVirtualMemory {
+    #[cfg(target_pointer_width = "32")]
+    fn get() -> Self {
+        unsafe {
+            let read_fn = get_ntdll_export("NtWow64ReadVirtualMemory64");
+            if read_fn.is_err() {
+                return ReadVirtualMemory::Local(NtReadVirtualMemory);
+            }
+
+            let read_fn =
+                std::mem::transmute::<FARPROC, PFN_NtWow64ReadVirtualMemory64>(read_fn.unwrap());
+
+            Self::Native(read_fn)
+        }
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    fn get() -> Self {
+        ReadVirtualMemory::Local(NtReadVirtualMemory)
+    }
+
+    fn invoke(&self, process_handle: HANDLE, base_address: u64, buffer: &mut [u8]) -> NTSTATUS {
+        unsafe {
+            match self {
+                ReadVirtualMemory::Local(local) => {
+                    let mut returned = 0;
+                    let status = local(
+                        process_handle,
+                        base_address.try_into().unwrap(),
+                        buffer.as_mut_ptr() as _,
+                        buffer.len(),
+                        &mut returned,
+                    );
+                    assert_eq!(returned, buffer.len());
+                    return status;
+                }
+                #[cfg(target_pointer_width = "32")]
+                ReadVirtualMemory::Native(native) => {
+                    let mut returned = 0;
+                    let status = native(
+                        process_handle,
+                        base_address,
+                        buffer.as_mut_ptr() as _,
+                        buffer.len().try_into().unwrap(),
+                        &mut returned,
+                    );
+                    assert_eq!(returned, buffer.len().try_into().unwrap());
+                    return status;
+                }
+            };
+        }
+    }
+}
+
+type PFN_NtReadVirtualMemory = unsafe extern "system" fn(
+    ProcessHandle: HANDLE,
+    BaseAddress: usize,
+    Buffer: *mut c_void,
+    BufferLength: usize,
+    ReturnLength: *mut usize,
+) -> NTSTATUS;
+
+#[cfg(target_pointer_width = "32")]
+type PFN_NtWow64ReadVirtualMemory64 = unsafe extern "system" fn(
+    ProcessHandle: HANDLE,
+    BaseAddress: u64,
+    Buffer: *mut c_void,
+    BufferLength: u64,
+    ReturnLength: *mut u64,
+) -> NTSTATUS;
+
+extern "system" {
+    #[link(name = "ntdll")]
+    fn NtReadVirtualMemory(
+        ProcessHandle: HANDLE,
+        BaseAddress: usize,
+        Buffer: *mut c_void,
+        BufferLength: usize,
+        ReturnLength: *mut usize,
+    ) -> NTSTATUS;
 }
 
 #[derive(Debug, Clone)]
@@ -193,5 +337,62 @@ fn append_copies<T: Copy>(vector: &mut Vec<T>, value: T, count: usize) {
     vector.reserve(count);
     for _ in 0..count {
         vector.push(value);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bindings::Windows::Win32::System::Threading::PROCESS_VM_READ;
+
+    use super::Process;
+    use super::ProcessCreator;
+
+    // https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
+    const MM_SHARED_USER_DATA_VA: u32 = 0x7FFE0000;
+    const NT_SYSTEM_ROOT_OFFSET: u32 = 0x30;
+
+    #[test]
+    fn read_memory_same_bitness() {
+        let this_process = Process::open_self(PROCESS_VM_READ).unwrap();
+
+        let number = 42u8;
+
+        let number_ptr: *const u8 = &number;
+        let mut bytes = [0; std::mem::size_of::<u8>()];
+        this_process
+            .read_memory(number_ptr as _, &mut bytes)
+            .unwrap();
+
+        assert_eq!(1, bytes.len());
+        assert_eq!(42, bytes[0]);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn read_memory_64_32() {
+        read_nt_system_root("C:\\Windows\\SysWOW64\\notepad.exe");
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn read_memory_32_64() {
+        read_nt_system_root("C:\\Windows\\SysNative\\notepad.exe");
+    }
+
+    fn read_nt_system_root(command_line: &str) {
+        let process = ProcessCreator::new_with_command_line(command_line)
+            .create()
+            .unwrap();
+
+        let nt_system_root: [u16; 0x104] = unsafe {
+            process
+                .read_struct((MM_SHARED_USER_DATA_VA + NT_SYSTEM_ROOT_OFFSET).into())
+                .unwrap()
+        };
+        let nt_system_root = String::from_utf16(&nt_system_root).unwrap();
+        let nt_system_root = nt_system_root.trim_end_matches('\0');
+        assert_eq!("C:\\Windows".to_lowercase(), nt_system_root.to_lowercase());
+
+        process.terminate(-1 as _).unwrap();
     }
 }

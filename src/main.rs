@@ -1,6 +1,9 @@
 #[macro_use]
 extern crate static_assertions;
 
+#[macro_use]
+extern crate lazy_static;
+
 use std::error::Error;
 
 use debugger::wait_for_debug_event;
@@ -9,6 +12,7 @@ use process::ProcessCreator;
 
 mod debugger;
 mod process;
+mod util;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();

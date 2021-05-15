@@ -68,14 +68,14 @@ impl Drop for DebugEventInfo {
     fn drop(&mut self) {
         match self {
             Self::CreateProcess(info) => {
-                if info.hFile != HANDLE(0) {
+                if info.hFile != HANDLE::NULL {
                     unsafe {
                         CloseHandle(info.hFile).ok().unwrap();
                     }
                 }
             }
             Self::LoadDLL(info) => {
-                if info.hFile != HANDLE(0) {
+                if info.hFile != HANDLE::NULL {
                     unsafe {
                         CloseHandle(info.hFile).ok().unwrap();
                     }
