@@ -3,13 +3,14 @@ use std::{collections::HashMap, convert::TryInto, error::Error};
 use bindings::Windows::Win32::System::{
     Diagnostics::Debug::{GetLastError, ReadProcessMemory, ERROR_INSUFFICIENT_BUFFER},
     SystemServices::{
-        NtQueryInformationProcess, QueryFullProcessImageNameW, HANDLE, PROCESS_NAME_FORMAT, PWSTR,
+        NtQueryInformationProcess, QueryFullProcessImageNameW, HANDLE, NTSTATUS,
+        PROCESS_NAME_FORMAT, PWSTR,
     },
     Threading::{
         CreateProcessW, GetCurrentProcessId, OpenProcess, TerminateProcess, DEBUG_PROCESS,
         PROCESS_ACCESS_RIGHTS, PROCESS_CREATION_FLAGS, STARTUPINFOW,
     },
-    WindowsProgramming::{CloseHandle, ProcessBasicInformation, PROCESS_BASIC_INFORMATION},
+    WindowsProgramming::{CloseHandle, ProcessBasicInformation},
 };
 use windows::HRESULT;
 
@@ -133,6 +134,10 @@ impl Process {
             "To avoid problems with WOW64, 32-bit builds are disallowed"
         );
 
+        Ok(self.get_process_basic_info()?.PebBaseAddress)
+    }
+
+    fn get_process_basic_info(&self) -> windows::Result<PROCESS_BASIC_INFORMATION> {
         unsafe {
             let mut info = PROCESS_BASIC_INFORMATION::default();
             let mut return_length = 0;
@@ -147,7 +152,7 @@ impl Process {
                 return Err(windows::Error::from(hresult_from_nt(status)));
             }
 
-            Ok(info.PebBaseAddress as usize)
+            Ok(info)
         }
     }
 
@@ -195,6 +200,14 @@ impl Process {
     pub fn process_id(&self) -> u32 {
         self.process_id
     }
+
+    pub fn parent_process_id(&self) -> windows::Result<u32> {
+        Ok(self
+            .get_process_basic_info()?
+            .InheritedFromUniqueProcessId
+            .try_into()
+            .unwrap())
+    }
 }
 
 impl Drop for Process {
@@ -203,6 +216,18 @@ impl Drop for Process {
             CloseHandle(self.handle).ok().unwrap();
         }
     }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+#[allow(non_snake_case)]
+struct PROCESS_BASIC_INFORMATION {
+    pub ExitStatus: NTSTATUS,
+    pub PebBaseAddress: usize,
+    pub AffinityMask: usize,
+    pub BasePriority: i32,
+    pub UniqueProcessId: usize,
+    pub InheritedFromUniqueProcessId: usize,
 }
 
 #[derive(Debug, Clone, Copy)]

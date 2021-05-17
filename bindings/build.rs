@@ -21,8 +21,6 @@ fn main() {
             VER_MAJORVERSION,
             VER_MINORVERSION,
             VER_SERVICEPACKMAJOR,
-
-            PROCESS_BASIC_INFORMATION,
         },
 
         Windows::Win32::System::Diagnostics::Debug::{
