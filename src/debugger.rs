@@ -2,15 +2,26 @@ use bindings::Windows::Win32::System::{
     Diagnostics::Debug::{
         ContinueDebugEvent, WaitForDebugEvent, CREATE_PROCESS_DEBUG_EVENT,
         CREATE_PROCESS_DEBUG_INFO, CREATE_THREAD_DEBUG_EVENT, CREATE_THREAD_DEBUG_INFO,
-        DEBUG_EVENT, DEBUG_EVENT_0, EXCEPTION_DEBUG_EVENT, EXCEPTION_DEBUG_INFO,
-        EXIT_PROCESS_DEBUG_EVENT, EXIT_PROCESS_DEBUG_INFO, EXIT_THREAD_DEBUG_EVENT,
-        EXIT_THREAD_DEBUG_INFO, LOAD_DLL_DEBUG_EVENT, LOAD_DLL_DEBUG_INFO,
-        OUTPUT_DEBUG_STRING_EVENT, OUTPUT_DEBUG_STRING_INFO, RIP_EVENT, RIP_INFO,
-        UNLOAD_DLL_DEBUG_EVENT, UNLOAD_DLL_DEBUG_INFO,
+        EXCEPTION_DEBUG_EVENT, EXCEPTION_DEBUG_INFO, EXIT_PROCESS_DEBUG_EVENT,
+        EXIT_PROCESS_DEBUG_INFO, EXIT_THREAD_DEBUG_EVENT, EXIT_THREAD_DEBUG_INFO,
+        LOAD_DLL_DEBUG_EVENT, LOAD_DLL_DEBUG_INFO, OUTPUT_DEBUG_STRING_EVENT,
+        OUTPUT_DEBUG_STRING_INFO, RIP_EVENT, RIP_INFO, UNLOAD_DLL_DEBUG_EVENT,
+        UNLOAD_DLL_DEBUG_INFO,
     },
     SystemServices::{DBG_CONTINUE, DBG_EXCEPTION_NOT_HANDLED, HANDLE},
     WindowsProgramming::{CloseHandle, INFINITE},
 };
+
+pub trait DebugEventHandler {
+    fn handle_event(&mut self, event: &DebugEvent) -> DebugEventResponse;
+}
+
+pub enum DebugEventResponse {
+    ExceptionHandled,
+    ExceptionNotHandled,
+    ExitExceptionHandled,
+    ExitExceptionNotHandled,
+}
 
 #[derive(Debug)]
 pub struct DebugEvent {
@@ -22,7 +33,7 @@ pub struct DebugEvent {
 assert_not_impl_any!(DebugEvent: Send, Sync);
 
 impl DebugEvent {
-    pub fn continue_event(self, handled: bool) -> windows::Result<()> {
+    fn continue_event(self, handled: bool) -> windows::Result<()> {
         unsafe {
             ContinueDebugEvent(
                 self.process_id,
@@ -86,16 +97,32 @@ impl Drop for DebugEventInfo {
     }
 }
 
-pub fn wait_for_debug_event(timeout_ms: Option<u32>) -> windows::Result<DebugEvent> {
+pub fn run_debug_loop(
+    handler: &mut impl DebugEventHandler,
+    timeout_ms: Option<u32>,
+) -> windows::Result<()> {
+    loop {
+        let debug_event = wait_for_debug_event(timeout_ms)?;
+
+        match handler.handle_event(&debug_event) {
+            DebugEventResponse::ExceptionHandled => debug_event.continue_event(true)?,
+            DebugEventResponse::ExceptionNotHandled => debug_event.continue_event(false)?,
+
+            DebugEventResponse::ExitExceptionHandled => {
+                debug_event.continue_event(true)?;
+                return Ok(());
+            }
+            DebugEventResponse::ExitExceptionNotHandled => {
+                debug_event.continue_event(false)?;
+                return Ok(());
+            }
+        }
+    }
+}
+
+fn wait_for_debug_event(timeout_ms: Option<u32>) -> windows::Result<DebugEvent> {
     unsafe {
-        let mut event = DEBUG_EVENT {
-            dwDebugEventCode: CREATE_PROCESS_DEBUG_EVENT,
-            dwProcessId: 0,
-            dwThreadId: 0,
-            u: DEBUG_EVENT_0 {
-                CreateProcessInfo: Default::default(),
-            },
-        };
+        let mut event = std::mem::zeroed();
 
         WaitForDebugEvent(&mut event, timeout_ms.unwrap_or(INFINITE)).ok()?;
 
