@@ -4,7 +4,6 @@ fn main() {
             OpenProcess,
             CreateProcessW,
             GetCurrentProcessId,
-            GetCurrentProcess,
             TerminateProcess,
 
             DEBUG_PROCESS,
@@ -18,13 +17,13 @@ fn main() {
             ProcessBasicInformation,
 
             PROCESS_BASIC_INFORMATION,
-            PROCESSINFOCLASS,
         },
 
         Windows::Win32::System::Diagnostics::Debug::{
             GetLastError,
             WaitForDebugEvent,
             ContinueDebugEvent,
+            ReadProcessMemory,
 
             FACILITY_NT_BIT,
 
@@ -41,16 +40,11 @@ fn main() {
         },
 
         Windows::Win32::System::SystemServices::{
-            GetModuleHandleW,
-            GetProcAddress,
             NtQueryInformationProcess,
             QueryFullProcessImageNameW,
-            IsWow64Process,
 
             DBG_CONTINUE,
             DBG_EXCEPTION_NOT_HANDLED,
-
-            NTSTATUS,
         },
 
         Windows::Win32::System::OleAutomation::{
