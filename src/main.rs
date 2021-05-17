@@ -1,4 +1,7 @@
 #[macro_use]
+extern crate lazy_static;
+
+#[macro_use]
 extern crate static_assertions;
 
 use std::{collections::HashSet, error::Error};
@@ -10,6 +13,7 @@ use wmi::{Wmi, WmiConnector};
 mod debugger;
 mod process;
 mod wmi;
+mod util;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
