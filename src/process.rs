@@ -339,7 +339,7 @@ impl ProcessCreator {
         self
     }
 
-    pub fn create(&self) -> Result<Process, Box<dyn Error>> {
+    pub fn create(&self) -> windows::Result<Process> {
         unsafe {
             let mut startup_info = STARTUPINFOW {
                 cb: std::mem::size_of::<STARTUPINFOW>().try_into().unwrap(),

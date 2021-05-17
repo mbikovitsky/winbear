@@ -7,8 +7,8 @@ use std::{
 use bindings::Windows::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
 
 use crate::{
-    debugger::{DebugEvent, DebugEventHandler, DebugEventInfo, DebugEventResponse},
-    process::Process,
+    debugger::{run_debug_loop, DebugEvent, DebugEventHandler, DebugEventInfo, DebugEventResponse},
+    process::{Process, ProcessCreator},
     util::command_line_to_argv,
 };
 
@@ -19,12 +19,20 @@ pub struct ExecutionLogger {
 }
 
 impl ExecutionLogger {
-    pub fn new() -> windows::Result<Self> {
-        Ok(Self {
+    pub fn new() -> Self {
+        Self {
             extant_processes: HashMap::new(),
             executions: BTreeMap::new(),
             next_id: 0,
-        })
+        }
+    }
+
+    pub fn log(&mut self, process_creator: &ProcessCreator) -> windows::Result<()> {
+        process_creator.clone().debug(true).create()?;
+
+        run_debug_loop(self, None)?;
+
+        Ok(())
     }
 
     pub fn executions(&self) -> Vec<&Execution> {
