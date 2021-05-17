@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate static_assertions;
 
-use std::error::Error;
+use std::{collections::{HashSet}, error::Error};
 
 use debugger::{wait_for_debug_event, DebugEventInfo};
 use process::ProcessCreator;
@@ -17,22 +17,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     windows::initialize_mta()?;
     let wmi = WmiConnector::new("root\\cimv2").connect()?;
 
-    let main_process_id = ProcessCreator::new_with_arguments(&args, false)
+    ProcessCreator::new_with_arguments(&args, false)
         .debug(true)
         .create()?
         .process_id();
+
+    let mut extant_processes = HashSet::new();
 
     loop {
         let debug_event = wait_for_debug_event(None)?;
 
         match debug_event.info() {
             DebugEventInfo::ExitProcess(_) => {
-                if debug_event.process_id() == main_process_id {
+                extant_processes.remove(&debug_event.process_id());
+
+                if extant_processes.is_empty() {
                     debug_event.continue_event(false)?;
                     break;
                 }
             }
             DebugEventInfo::CreateProcess(_) => {
+                extant_processes.insert(debug_event.process_id());
+
                 let command_line = get_process_command_line(&wmi, debug_event.process_id())?;
                 if let Some(command_line) = command_line {
                     dbg!(command_line);
