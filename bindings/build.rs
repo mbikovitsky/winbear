@@ -52,5 +52,9 @@ fn main() {
             DBG_EXCEPTION_NOT_HANDLED,
             VER_GREATER_EQUAL,
         },
+
+        Windows::Win32::UI::Shell::CommandLineToArgvW,
+
+        Windows::Win32::System::Memory::LocalFree,
     );
 }

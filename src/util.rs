@@ -1,13 +1,18 @@
 use std::convert::TryInto;
 
-use bindings::Windows::Win32::System::{
-    Diagnostics::Debug::FACILITY_NT_BIT,
-    SystemServices::{NTSTATUS, VER_GREATER_EQUAL},
-    WindowsProgramming::{
-        VerSetConditionMask, VerifyVersionInfoW, OSVERSIONINFOEXW, VER_MAJORVERSION,
-        VER_MINORVERSION, VER_SERVICEPACKMAJOR,
+use bindings::Windows::Win32::{
+    System::{
+        Diagnostics::Debug::FACILITY_NT_BIT,
+        Memory::LocalFree,
+        SystemServices::{NTSTATUS, VER_GREATER_EQUAL},
+        WindowsProgramming::{
+            VerSetConditionMask, VerifyVersionInfoW, OSVERSIONINFOEXW, VER_MAJORVERSION,
+            VER_MINORVERSION, VER_SERVICEPACKMAJOR,
+        },
     },
+    UI::Shell::CommandLineToArgvW,
 };
+use widestring::U16CStr;
 use windows::HRESULT;
 
 pub fn nt_success(status: NTSTATUS) -> bool {
@@ -49,5 +54,26 @@ fn is_windows_version_or_greater(
             mask,
         )
         .as_bool()
+    }
+}
+
+pub fn command_line_to_argv(command_line: impl AsRef<str>) -> windows::Result<Vec<String>> {
+    unsafe {
+        let mut argc = 0;
+        let argv = CommandLineToArgvW(command_line.as_ref(), &mut argc);
+        if argv.is_null() {
+            return Err(windows::Error::from(HRESULT::from_thread()));
+        }
+
+        let argv_slice = std::slice::from_raw_parts(argv, argc.try_into().unwrap());
+
+        let result = argv_slice
+            .iter()
+            .map(|argument_ptr| U16CStr::from_ptr_str(argument_ptr.0).to_string().unwrap())
+            .collect();
+
+        LocalFree(argv as _);
+
+        Ok(result)
     }
 }
