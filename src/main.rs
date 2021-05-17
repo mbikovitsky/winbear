@@ -1,6 +1,9 @@
 #[macro_use]
 extern crate static_assertions;
 
+#[macro_use]
+extern crate json;
+
 use std::error::Error;
 
 use execution_logger::ExecutionLogger;

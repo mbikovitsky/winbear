@@ -4,6 +4,8 @@ use std::{
     time::SystemTime,
 };
 
+use chrono::{DateTime, Utc};
+
 use bindings::Windows::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
 
 use crate::{
@@ -37,6 +39,64 @@ impl ExecutionLogger {
 
     pub fn executions(&self) -> Vec<&Execution> {
         self.executions.values().collect()
+    }
+
+    pub fn to_json(&self, spaces: Option<u16>) -> String {
+        let executions: Vec<_> = self
+            .executions
+            .values()
+            .map(|execution| {
+                let events: Vec<_> = execution
+                    .run
+                    .events
+                    .iter()
+                    .map(|event| {
+                        let at: DateTime<Utc> = event.at.into();
+                        let at = at.format("%Y-%m-%dT%H:%M:%S%.3fZ");
+                        let at = at.to_string();
+                        match event.kind {
+                            EventKind::Start => {
+                                object! {
+                                    "at": at,
+                                    "type": "start",
+                                }
+                            }
+                            EventKind::Stop { status } => {
+                                object! {
+                                    "at": at,
+                                    "type": "stop",
+                                    "status": status
+                                }
+                            }
+                        }
+                    })
+                    .collect();
+
+                object! {
+                    "command": {
+                        "arguments": execution.command.arguments.as_slice(),
+                        "environment": execution.command.environment.clone(),
+                        "program": execution.command.program.as_str(),
+                        "working_dir": execution.command.working_dir.as_str(),
+                    },
+                    "run": {
+                        "events": events.as_slice(),
+                        "pid": execution.run.pid,
+                        "ppid": execution.run.ppid,
+                    }
+                }
+            })
+            .collect();
+
+        let result_object = object! {
+            "executions": executions.as_slice()
+        };
+
+        if let Some(spaces) = spaces {
+            result_object.pretty(spaces)
+        } else {
+            result_object.dump()
+        }
     }
 
     fn add_execution(&mut self, process_id: u32) -> Result<(), Box<dyn Error>> {
