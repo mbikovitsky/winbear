@@ -1,4 +1,4 @@
-use std::{convert::TryInto, error::Error};
+use std::{collections::HashMap, convert::TryInto, error::Error};
 
 use bindings::Windows::Win32::System::{
     Diagnostics::Debug::{GetLastError, ReadProcessMemory, ERROR_INSUFFICIENT_BUFFER},
@@ -13,7 +13,7 @@ use bindings::Windows::Win32::System::{
 };
 use windows::HRESULT;
 
-use crate::util::{hresult_from_nt, nt_success};
+use crate::util::{hresult_from_nt, is_windows_vista_or_greater, nt_success};
 
 #[derive(Debug)]
 pub struct Process {
@@ -70,10 +70,7 @@ impl Process {
     }
 
     pub fn command_line(&self) -> Result<String, Box<dyn Error>> {
-        let peb = self.native_peb()?;
-
-        let params: RTL_USER_PROCESS_PARAMETERS64 =
-            unsafe { self.read_struct(peb.ProcessParameters.try_into().unwrap())? };
+        let params = self.native_process_parameters()?;
 
         let mut command_line_bytes = vec![0; params.CommandLine.Length.into()];
         self.read_memory(
@@ -89,6 +86,46 @@ impl Process {
         };
 
         Ok(String::from_utf16(command_line_chars)?)
+    }
+
+    pub fn environment(&self) -> Result<HashMap<String, String>, Box<dyn Error>> {
+        let params = self.native_process_parameters()?;
+
+        let environment_block = unsafe {
+            let mut environment_block_bytes = vec![0; params.EnvironmentSize.try_into().unwrap()];
+            self.read_memory(
+                params.Environment.try_into().unwrap(),
+                &mut environment_block_bytes,
+            )?;
+
+            let environment_block_slice: &[u16] = std::slice::from_raw_parts(
+                environment_block_bytes.as_ptr() as _,
+                environment_block_bytes.len() / std::mem::size_of::<u16>(),
+            );
+
+            String::from_utf16(environment_block_slice)?
+        };
+
+        let environment = environment_block
+            .split('\0')
+            .take_while(|pair_string| !pair_string.is_empty())
+            .filter_map(|pair_string| pair_string.split_once('='))
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+
+        Ok(environment)
+    }
+
+    fn native_process_parameters(&self) -> Result<RTL_USER_PROCESS_PARAMETERS64, Box<dyn Error>> {
+        let peb = self.native_peb()?;
+
+        // The definition of RTL_USER_PROCESS_PARAMETERS64 is valid from Vista only
+        assert!(is_windows_vista_or_greater());
+
+        let params: RTL_USER_PROCESS_PARAMETERS64 =
+            unsafe { self.read_struct(peb.ProcessParameters.try_into().unwrap())? };
+
+        Ok(params)
     }
 
     fn native_peb(&self) -> windows::Result<PEB64> {
@@ -182,7 +219,7 @@ impl Default for PEB64 {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 #[allow(non_snake_case)]
 struct RTL_USER_PROCESS_PARAMETERS64 {
@@ -190,6 +227,15 @@ struct RTL_USER_PROCESS_PARAMETERS64 {
     pub Reserved2: [u64; 10],
     pub ImagePathName: UNICODE_STRING64,
     pub CommandLine: UNICODE_STRING64,
+    pub Environment: u64,
+    pub Reserved3: [u8; 0x368],
+    pub EnvironmentSize: u64,
+}
+
+impl Default for RTL_USER_PROCESS_PARAMETERS64 {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -345,6 +391,8 @@ fn append_copies<T: Copy>(vector: &mut Vec<T>, value: T, count: usize) {
 
 #[cfg(test)]
 mod tests {
+    use std::{convert::TryInto, env};
+
     use bindings::Windows::Win32::System::Threading::PROCESS_VM_READ;
 
     use super::Process;
@@ -383,14 +431,18 @@ mod tests {
 
         let nt_system_root: [u16; 0x104] = unsafe {
             process
-                .read_struct((MM_SHARED_USER_DATA_VA + NT_SYSTEM_ROOT_OFFSET).into())
+                .read_struct(
+                    (MM_SHARED_USER_DATA_VA + NT_SYSTEM_ROOT_OFFSET)
+                        .try_into()
+                        .unwrap(),
+                )
                 .unwrap()
         };
         let nt_system_root = String::from_utf16(&nt_system_root).unwrap();
         let nt_system_root = nt_system_root.trim_end_matches('\0');
         assert_eq!("C:\\Windows".to_lowercase(), nt_system_root.to_lowercase());
 
-        process.terminate(-1 as _).unwrap();
+        process.terminate(-1i32 as _).unwrap();
     }
 
     #[test]
@@ -413,6 +465,33 @@ mod tests {
 
         assert_eq!(read_command_line, command_line);
 
-        process.terminate(-1 as _).unwrap();
+        process.terminate(-1i32 as _).unwrap();
+    }
+
+    #[test]
+    fn environment_same_bitness() {
+        test_environment_block("C:\\Windows\\System32\\notepad.exe", "PASTEN", "PASTEN");
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn environment_64_32() {
+        test_environment_block("C:\\Windows\\SysWOW64\\notepad.exe", "PASTEN", "PASTEN");
+    }
+
+    fn test_environment_block(command_line: &str, variable: &str, value: &str) {
+        env::set_var(variable, value);
+
+        let process = ProcessCreator::new_with_command_line(command_line)
+            .create()
+            .unwrap();
+
+        let read_env_block = process.environment().unwrap();
+
+        assert_eq!(value, read_env_block.get(variable).unwrap());
+
+        process.terminate(-1i32 as _).unwrap();
+
+        env::remove_var(variable);
     }
 }

@@ -13,9 +13,14 @@ fn main() {
 
         Windows::Win32::System::WindowsProgramming::{
             CloseHandle,
+            VerSetConditionMask,
+            VerifyVersionInfoW,
 
             INFINITE,
             ProcessBasicInformation,
+            VER_MAJORVERSION,
+            VER_MINORVERSION,
+            VER_SERVICEPACKMAJOR,
 
             PROCESS_BASIC_INFORMATION,
         },
@@ -46,6 +51,7 @@ fn main() {
 
             DBG_CONTINUE,
             DBG_EXCEPTION_NOT_HANDLED,
+            VER_GREATER_EQUAL,
         },
     );
 }
