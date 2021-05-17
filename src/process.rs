@@ -73,10 +73,13 @@ impl Process {
         let peb = self.native_peb()?;
 
         let params: RTL_USER_PROCESS_PARAMETERS64 =
-            unsafe { self.read_struct(peb.ProcessParameters.into())? };
+            unsafe { self.read_struct(peb.ProcessParameters.try_into().unwrap())? };
 
         let mut command_line_bytes = vec![0; params.CommandLine.Length.into()];
-        self.read_memory(params.CommandLine.Buffer.into(), &mut command_line_bytes)?;
+        self.read_memory(
+            params.CommandLine.Buffer.try_into().unwrap(),
+            &mut command_line_bytes,
+        )?;
 
         let command_line_chars = unsafe {
             std::slice::from_raw_parts::<u16>(
@@ -94,8 +97,11 @@ impl Process {
         unsafe { Ok(self.read_struct(peb_address)?) }
     }
 
-    fn native_peb_address(&self) -> windows::Result<u64> {
-        assert_cfg!(target_pointer_width = "64", "To avoid problems with WOW64, 32-bit builds are disallowed");
+    fn native_peb_address(&self) -> windows::Result<usize> {
+        assert_cfg!(
+            target_pointer_width = "64",
+            "To avoid problems with WOW64, 32-bit builds are disallowed"
+        );
 
         unsafe {
             let mut info = PROCESS_BASIC_INFORMATION::default();
@@ -111,11 +117,11 @@ impl Process {
                 return Err(windows::Error::from(hresult_from_nt(status)));
             }
 
-            Ok((info.PebBaseAddress as usize).try_into().unwrap())
+            Ok(info.PebBaseAddress as usize)
         }
     }
 
-    pub fn read_memory(&self, base_address: u64, buffer: &mut [u8]) -> windows::Result<()> {
+    pub fn read_memory(&self, base_address: usize, buffer: &mut [u8]) -> windows::Result<()> {
         unsafe {
             let mut bytes_read = 0;
             ReadProcessMemory(
@@ -132,7 +138,7 @@ impl Process {
         Ok(())
     }
 
-    pub unsafe fn read_struct<T: Copy>(&self, base_address: u64) -> windows::Result<T> {
+    pub unsafe fn read_struct<T: Copy>(&self, base_address: usize) -> windows::Result<T> {
         let mut buffer = vec![0; std::mem::size_of::<T>()];
 
         self.read_memory(base_address, &mut buffer)?;
