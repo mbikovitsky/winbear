@@ -35,9 +35,7 @@ impl Drop for Process {
 #[derive(Debug, Clone)]
 pub struct ProcessCreator {
     command_line: String,
-    inherit_handles: bool,
     flags: PROCESS_CREATION_FLAGS,
-    current_directory: Option<String>,
 }
 
 impl ProcessCreator {
@@ -63,15 +61,8 @@ impl ProcessCreator {
     fn new(command_line: String) -> Self {
         Self {
             command_line,
-            inherit_handles: false,
             flags: Default::default(),
-            current_directory: None,
         }
-    }
-
-    pub fn inherit_handles(mut self, value: bool) -> ProcessCreator {
-        self.inherit_handles = value;
-        self
     }
 
     pub fn debug(mut self, value: bool) -> ProcessCreator {
@@ -80,11 +71,6 @@ impl ProcessCreator {
         } else {
             self.flags = PROCESS_CREATION_FLAGS(self.flags.0 & !DEBUG_PROCESS.0);
         }
-        self
-    }
-
-    pub fn current_directory(mut self, value: Option<&str>) -> ProcessCreator {
-        self.current_directory = value.and_then(|value| Some(value.to_string()));
         self
     }
 
@@ -97,33 +83,19 @@ impl ProcessCreator {
 
             let mut process_info = Default::default();
 
-            let success = match &self.current_directory {
-                Some(current_directory) => CreateProcessW(
-                    None,
-                    self.command_line.to_string(),
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    self.inherit_handles,
-                    self.flags,
-                    std::ptr::null_mut(),
-                    current_directory.as_str(),
-                    &mut startup_info,
-                    &mut process_info,
-                ),
-                None => CreateProcessW(
-                    None,
-                    self.command_line.to_string(),
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    self.inherit_handles,
-                    self.flags,
-                    std::ptr::null_mut(),
-                    None,
-                    &mut startup_info,
-                    &mut process_info,
-                ),
-            };
-            success.ok()?;
+            CreateProcessW(
+                None,
+                self.command_line.to_string(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                false,
+                self.flags,
+                std::ptr::null_mut(),
+                None,
+                &mut startup_info,
+                &mut process_info,
+            )
+            .ok()?;
 
             CloseHandle(process_info.hThread).ok().unwrap();
 

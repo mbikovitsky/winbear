@@ -38,7 +38,9 @@ struct CommandLineLogger {
 impl CommandLineLogger {
     pub fn new() -> windows::Result<Self> {
         Ok(Self {
-            wmi: WmiConnector::new("root\\cimv2").connect()?,
+            wmi: WmiConnector::new("root\\cimv2")
+                .use_max_wait(true)
+                .connect()?,
             extant_processes: HashSet::new(),
             command_lines: Vec::new(),
         })

@@ -123,42 +123,19 @@ impl Drop for Variant {
 #[derive(Debug, Clone)]
 pub struct WmiConnector {
     namespace: String,
-    user: Option<String>,
-    password: Option<String>,
-    locale: Option<String>,
     use_max_wait: bool,
-    authority: Option<String>,
 }
 
 impl WmiConnector {
     pub fn new(namespace: impl AsRef<str>) -> Self {
         Self {
             namespace: namespace.as_ref().to_string(),
-            user: None,
-            password: None,
-            locale: None,
             use_max_wait: false,
-            authority: None,
         }
     }
 
-    pub fn user(mut self, user: impl AsRef<str>) -> Self {
-        self.user = Some(user.as_ref().to_string());
-        self
-    }
-
-    pub fn password(mut self, password: impl AsRef<str>) -> Self {
-        self.password = Some(password.as_ref().to_string());
-        self
-    }
-
-    pub fn locale(mut self, locale: impl AsRef<str>) -> Self {
-        self.locale = Some(locale.as_ref().to_string());
-        self
-    }
-
-    pub fn authority(mut self, authority: impl AsRef<str>) -> Self {
-        self.authority = Some(authority.as_ref().to_string());
+    pub fn use_max_wait(mut self, value: bool) -> Self {
+        self.use_max_wait = value;
         self
     }
 
@@ -170,15 +147,15 @@ impl WmiConnector {
             locator
                 .ConnectServer(
                     BSTR::from(&self.namespace),
-                    self.user.as_ref().map(BSTR::from),
-                    self.password.as_ref().map(BSTR::from),
-                    self.locale.as_ref().map(BSTR::from),
+                    None,
+                    None,
+                    None,
                     if self.use_max_wait {
                         WBEM_FLAG_CONNECT_USE_MAX_WAIT.0
                     } else {
                         0
                     },
-                    self.authority.as_ref().map(BSTR::from),
+                    None,
                     None,
                     &mut services,
                 )
