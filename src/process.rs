@@ -72,20 +72,7 @@ impl Process {
     pub fn command_line(&self) -> Result<String, Box<dyn Error>> {
         let params = self.native_process_parameters()?;
 
-        let mut command_line_bytes = vec![0; params.CommandLine.Length.into()];
-        self.read_memory(
-            params.CommandLine.Buffer.try_into().unwrap(),
-            &mut command_line_bytes,
-        )?;
-
-        let command_line_chars = unsafe {
-            std::slice::from_raw_parts::<u16>(
-                command_line_bytes.as_ptr() as _,
-                command_line_bytes.len() / std::mem::size_of::<u16>(),
-            )
-        };
-
-        Ok(String::from_utf16(command_line_chars)?)
+        Ok(self.read_unicode_string(&params.CommandLine)?)
     }
 
     pub fn environment(&self) -> Result<HashMap<String, String>, Box<dyn Error>> {
@@ -114,6 +101,12 @@ impl Process {
             .collect();
 
         Ok(environment)
+    }
+
+    pub fn current_directory(&self) -> Result<String, Box<dyn Error>> {
+        let params = self.native_process_parameters()?;
+
+        Ok(self.read_unicode_string(&params.CurrentDirectory.DosPath)?)
     }
 
     fn native_process_parameters(&self) -> Result<RTL_USER_PROCESS_PARAMETERS64, Box<dyn Error>> {
@@ -185,6 +178,20 @@ impl Process {
         Ok(ptr.read_unaligned())
     }
 
+    fn read_unicode_string(&self, string: &UNICODE_STRING64) -> Result<String, Box<dyn Error>> {
+        let mut string_bytes = vec![0; string.Length.into()];
+        self.read_memory(string.Buffer.try_into().unwrap(), &mut string_bytes)?;
+
+        let string_chars = unsafe {
+            std::slice::from_raw_parts::<u16>(
+                string_bytes.as_ptr() as _,
+                string_bytes.len() / std::mem::size_of::<u16>(),
+            )
+        };
+
+        Ok(String::from_utf16(string_chars)?)
+    }
+
     pub fn process_id(&self) -> u32 {
         self.process_id
     }
@@ -224,7 +231,9 @@ impl Default for PEB64 {
 #[allow(non_snake_case)]
 struct RTL_USER_PROCESS_PARAMETERS64 {
     pub Reserved1: [u8; 16],
-    pub Reserved2: [u64; 10],
+    pub Reserved2: [u64; 5],
+    pub CurrentDirectory: CURDIR64,
+    pub DllPath: UNICODE_STRING64,
     pub ImagePathName: UNICODE_STRING64,
     pub CommandLine: UNICODE_STRING64,
     pub Environment: u64,
@@ -236,6 +245,14 @@ impl Default for RTL_USER_PROCESS_PARAMETERS64 {
     fn default() -> Self {
         unsafe { std::mem::zeroed() }
     }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+#[allow(non_snake_case)]
+struct CURDIR64 {
+    pub DosPath: UNICODE_STRING64,
+    pub Handle: u64,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -391,9 +408,9 @@ fn append_copies<T: Copy>(vector: &mut Vec<T>, value: T, count: usize) {
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::TryInto, env};
+    use std::{convert::TryInto, env, fs};
 
-    use bindings::Windows::Win32::System::Threading::PROCESS_VM_READ;
+    use bindings::Windows::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
 
     use super::Process;
     use super::ProcessCreator;
@@ -493,5 +510,67 @@ mod tests {
         process.terminate(-1i32 as _).unwrap();
 
         env::remove_var(variable);
+    }
+
+    #[test]
+    fn self_current_directory() {
+        let this_process = Process::open_self(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION).unwrap();
+
+        let read_current_directory = this_process.current_directory().unwrap();
+
+        let actual_current_directory = env::current_dir().unwrap();
+
+        assert_eq!(
+            fs::canonicalize(actual_current_directory).unwrap(),
+            fs::canonicalize(read_current_directory).unwrap()
+        );
+    }
+
+    #[test]
+    fn self_change_current_directory() {
+        let original_dir = env::current_dir().unwrap();
+
+        let parent_dir = original_dir.parent().unwrap();
+
+        env::set_current_dir(parent_dir).unwrap();
+
+        let this_process = Process::open_self(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION).unwrap();
+
+        let read_current_directory = this_process.current_directory().unwrap();
+
+        assert_eq!(
+            fs::canonicalize(parent_dir).unwrap(),
+            fs::canonicalize(read_current_directory).unwrap()
+        );
+
+        env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[test]
+    fn current_directory_same_bitness() {
+        test_remote_current_directory("C:\\Windows\\System32\\notepad.exe");
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn current_directory_64_32() {
+        test_remote_current_directory("C:\\Windows\\SysWOW64\\notepad.exe");
+    }
+
+    fn test_remote_current_directory(command_line: &str) {
+        let process = ProcessCreator::new_with_command_line(command_line)
+            .create()
+            .unwrap();
+
+        let read_current_directory = process.current_directory().unwrap();
+
+        let actual_current_directory = env::current_dir().unwrap();
+
+        assert_eq!(
+            fs::canonicalize(actual_current_directory).unwrap(),
+            fs::canonicalize(read_current_directory).unwrap()
+        );
+
+        process.terminate(-1i32 as _).unwrap();
     }
 }
