@@ -3,19 +3,17 @@ extern crate static_assertions;
 
 use std::{collections::HashSet, error::Error};
 
+use bindings::Windows::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+
 use debugger::{run_debug_loop, DebugEvent, DebugEventHandler, DebugEventInfo, DebugEventResponse};
-use process::ProcessCreator;
-use wmi::{Wmi, WmiConnector};
+use process::{Process, ProcessCreator};
 
 mod debugger;
 mod process;
 mod util;
-mod wmi;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-
-    windows::initialize_mta()?;
 
     let mut logger = CommandLineLogger::new()?;
 
@@ -31,7 +29,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 struct CommandLineLogger {
-    wmi: Wmi,
     extant_processes: HashSet<u32>,
     command_lines: Vec<String>,
 }
@@ -39,9 +36,6 @@ struct CommandLineLogger {
 impl CommandLineLogger {
     pub fn new() -> windows::Result<Self> {
         Ok(Self {
-            wmi: WmiConnector::new("root\\cimv2")
-                .use_max_wait(true)
-                .connect()?,
             extant_processes: HashSet::new(),
             command_lines: Vec::new(),
         })
@@ -51,19 +45,10 @@ impl CommandLineLogger {
         &self.command_lines
     }
 
-    fn get_process_command_line(&self, process_id: u32) -> windows::Result<Option<String>> {
-        const E_NOTFOUND: windows::HRESULT = windows::HRESULT(0x8000100D);
+    fn get_process_command_line(&self, process_id: u32) -> Result<String, Box<dyn Error>> {
+        let process = Process::open(process_id, PROCESS_VM_READ | PROCESS_QUERY_INFORMATION)?;
 
-        Ok(self
-            .wmi
-            .exec_query(format!(
-                "select CommandLine from Win32_Process where ProcessId = {}",
-                process_id
-            ))?
-            .nth(0)
-            .ok_or(windows::Error::from(E_NOTFOUND))??
-            .get("CommandLine")?
-            .get_string())
+        Ok(process.command_line()?)
     }
 }
 
@@ -74,9 +59,7 @@ impl DebugEventHandler for CommandLineLogger {
                 self.extant_processes.insert(event.process_id());
 
                 if let Ok(command_line) = self.get_process_command_line(event.process_id()) {
-                    if let Some(command_line) = command_line {
-                        self.command_lines.push(command_line);
-                    }
+                    self.command_lines.push(command_line)
                 }
 
                 // TODO: log command-line acquisition failure
