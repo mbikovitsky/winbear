@@ -7,8 +7,8 @@ use bindings::Windows::Win32::System::{
         PROCESS_NAME_FORMAT, PWSTR,
     },
     Threading::{
-        CreateProcessW, GetCurrentProcessId, OpenProcess, TerminateProcess, DEBUG_PROCESS,
-        PROCESS_ACCESS_RIGHTS, PROCESS_CREATION_FLAGS, STARTUPINFOW,
+        CreateProcessW, GetCurrentProcessId, GetExitCodeProcess, OpenProcess, TerminateProcess,
+        DEBUG_PROCESS, PROCESS_ACCESS_RIGHTS, PROCESS_CREATION_FLAGS, STARTUPINFOW,
     },
     WindowsProgramming::{CloseHandle, ProcessBasicInformation},
 };
@@ -207,6 +207,14 @@ impl Process {
             .InheritedFromUniqueProcessId
             .try_into()
             .unwrap())
+    }
+
+    pub fn exit_code(&self) -> windows::Result<u32> {
+        unsafe {
+            let mut exit_code = 0;
+            GetExitCodeProcess(self.handle, &mut exit_code).ok()?;
+            Ok(exit_code)
+        }
     }
 }
 

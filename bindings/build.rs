@@ -5,6 +5,7 @@ fn main() {
             CreateProcessW,
             GetCurrentProcessId,
             TerminateProcess,
+            GetExitCodeProcess,
 
             DEBUG_PROCESS,
             PROCESS_VM_READ,
