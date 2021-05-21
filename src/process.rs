@@ -26,23 +26,24 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn open(process_id: u32, access: PROCESS_ACCESS_RIGHTS) -> windows::Result<Self> {
+    pub fn open(process_id: u32, access: PROCESS_ACCESS_RIGHTS) -> Result<Self, Box<dyn Error>> {
         unsafe {
             let handle = OpenProcess(access, false, process_id);
             if handle.is_null() {
-                return Err(windows::Error::from(HRESULT::from_thread()));
+                return Err(windows::Error::from(HRESULT::from_thread()))?;
             }
 
             Ok(Process { handle, process_id })
         }
     }
 
-    pub fn open_self(access: PROCESS_ACCESS_RIGHTS) -> windows::Result<Self> {
+    pub fn open_self(access: PROCESS_ACCESS_RIGHTS) -> Result<Self, Box<dyn Error>> {
         Self::open(unsafe { GetCurrentProcessId() }, access)
     }
 
-    pub fn terminate(&self, exit_code: u32) -> windows::Result<()> {
-        unsafe { TerminateProcess(self.handle, exit_code).ok() }
+    pub fn terminate(&self, exit_code: u32) -> Result<(), Box<dyn Error>> {
+        unsafe { TerminateProcess(self.handle, exit_code).ok()? }
+        Ok(())
     }
 
     pub fn image_name(&self) -> Result<PathBuf, Box<dyn Error>> {
@@ -119,13 +120,13 @@ impl Process {
         Ok(params)
     }
 
-    fn native_peb(&self) -> windows::Result<PEB64> {
+    fn native_peb(&self) -> Result<PEB64, Box<dyn Error>> {
         let peb_address = self.native_peb_address()?;
 
         unsafe { Ok(self.read_struct(peb_address)?) }
     }
 
-    fn native_peb_address(&self) -> windows::Result<usize> {
+    fn native_peb_address(&self) -> Result<usize, Box<dyn Error>> {
         assert_cfg!(
             target_pointer_width = "64",
             "To avoid problems with WOW64, 32-bit builds are disallowed"
@@ -134,7 +135,7 @@ impl Process {
         Ok(self.get_process_basic_info()?.PebBaseAddress)
     }
 
-    fn get_process_basic_info(&self) -> windows::Result<PROCESS_BASIC_INFORMATION> {
+    fn get_process_basic_info(&self) -> Result<PROCESS_BASIC_INFORMATION, Box<dyn Error>> {
         unsafe {
             let mut info = PROCESS_BASIC_INFORMATION::default();
             let mut return_length = 0;
@@ -146,14 +147,18 @@ impl Process {
                 &mut return_length,
             );
             if !nt_success(status) {
-                return Err(windows::Error::from(hresult_from_nt(status)));
+                return Err(windows::Error::from(hresult_from_nt(status)))?;
             }
 
             Ok(info)
         }
     }
 
-    pub fn read_memory(&self, base_address: usize, buffer: &mut [u8]) -> windows::Result<()> {
+    pub fn read_memory(
+        &self,
+        base_address: usize,
+        buffer: &mut [u8],
+    ) -> Result<(), Box<dyn Error>> {
         unsafe {
             let mut bytes_read = 0;
             ReadProcessMemory(
@@ -170,7 +175,7 @@ impl Process {
         Ok(())
     }
 
-    pub unsafe fn read_struct<T: Copy>(&self, base_address: usize) -> windows::Result<T> {
+    pub unsafe fn read_struct<T: Copy>(&self, base_address: usize) -> Result<T, Box<dyn Error>> {
         let mut buffer = vec![0; std::mem::size_of::<T>()];
 
         self.read_memory(base_address, &mut buffer)?;
@@ -184,7 +189,7 @@ impl Process {
         &self,
         base_address: usize,
         output: &mut [T],
-    ) -> windows::Result<()> {
+    ) -> Result<(), Box<dyn Error>> {
         let buffer = std::slice::from_raw_parts_mut(
             output.as_mut_ptr() as _,
             output.len() * std::mem::size_of::<T>(),
@@ -208,7 +213,7 @@ impl Process {
         self.process_id
     }
 
-    pub fn parent_process_id(&self) -> windows::Result<u32> {
+    pub fn parent_process_id(&self) -> Result<u32, Box<dyn Error>> {
         Ok(self
             .get_process_basic_info()?
             .InheritedFromUniqueProcessId
@@ -216,7 +221,7 @@ impl Process {
             .unwrap())
     }
 
-    pub fn exit_code(&self) -> windows::Result<u32> {
+    pub fn exit_code(&self) -> Result<u32, Box<dyn Error>> {
         unsafe {
             let mut exit_code = 0;
             GetExitCodeProcess(self.handle, &mut exit_code).ok()?;
@@ -376,7 +381,7 @@ impl ProcessCreator {
         self
     }
 
-    pub fn create(&self) -> windows::Result<Process> {
+    pub fn create(&self) -> Result<Process, Box<dyn Error>> {
         unsafe {
             let mut startup_info = STARTUPINFOW {
                 cb: std::mem::size_of::<STARTUPINFOW>().try_into().unwrap(),

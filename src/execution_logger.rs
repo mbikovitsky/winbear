@@ -31,7 +31,7 @@ impl ExecutionLogger {
         }
     }
 
-    pub fn log(&mut self, process_creator: &ProcessCreator) -> windows::Result<()> {
+    pub fn log(&mut self, process_creator: &ProcessCreator) -> Result<(), Box<dyn Error>> {
         process_creator.clone().debug(true).create()?;
 
         run_debug_loop(self, None)?;
