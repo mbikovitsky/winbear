@@ -6,14 +6,14 @@ use std::{
     time::SystemTime,
 };
 
+use bindings::Windows::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
 use chrono::{DateTime, Utc};
 
-use bindings::Windows::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+use util::command_line_to_argv;
 
 use crate::{
     debugger::{run_debug_loop, DebugEvent, DebugEventHandler, DebugEventInfo, DebugEventResponse},
     process::{EnvironmentBlock, Process, ProcessCreator},
-    util::command_line_to_argv,
 };
 
 pub struct ExecutionLogger {

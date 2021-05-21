@@ -14,7 +14,6 @@ use process::ProcessCreator;
 mod debugger;
 mod execution_logger;
 mod process;
-mod util;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = App::new(crate_name!())

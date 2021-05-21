@@ -1,5 +1,5 @@
 [package]
-name = "winbear"
+name = "util"
 version = "0.1.0"
 authors = ["Michael Bikovitsky <biko@bikodbg.com>"]
 edition = "2018"
@@ -7,12 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bindings = { path = "bindings" }
+bindings = { path = "../bindings" }
 windows = "0.10.0"
 
-util = { path = "util" }
-
-static_assertions = "1.1.0"
-json = "0.12.4"
-chrono = "0.4"
-clap = "2.33.3"
+widestring = "0.4.3"

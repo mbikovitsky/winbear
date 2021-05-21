@@ -17,7 +17,7 @@ use bindings::Windows::Win32::System::{
 };
 use windows::HRESULT;
 
-use crate::util::{hresult_from_nt, is_windows_vista_or_greater, nt_success};
+use util::{hresult_from_nt, is_windows_vista_or_greater, nt_success};
 
 #[derive(Debug)]
 pub struct Process {
