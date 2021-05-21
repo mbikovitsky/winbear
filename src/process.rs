@@ -17,7 +17,7 @@ use bindings::Windows::Win32::System::{
 };
 use windows::HRESULT;
 
-use util::{hresult_from_nt, is_windows_vista_or_greater, nt_success};
+use util::{hresult_from_nt, is_windows_vista_or_greater, nt_success, quote_argument};
 
 #[derive(Debug)]
 pub struct Process {
@@ -424,73 +424,6 @@ impl ProcessCreator {
                 process_id: process_info.dwProcessId,
             })
         }
-    }
-}
-
-fn quote_argument(argument: impl AsRef<str>, force: bool) -> String {
-    let argument = argument.as_ref();
-
-    // Adapted from:
-    // https://docs.microsoft.com/en-us/archive/blogs/twistylittlepassagesallalike/everyone-quotes-command-line-arguments-the-wrong-way
-
-    //
-    // Unless we're told otherwise, don't quote unless we actually
-    // need to do so --- hopefully avoid problems if programs won't
-    // parse quotes properly
-    //
-    if !force && !argument.is_empty() && !argument.contains(|c: char| c.is_whitespace() || c == '"')
-    {
-        return argument.to_string();
-    }
-
-    let mut result = vec!['"'];
-
-    let mut iterator = argument.chars().peekable();
-    loop {
-        let mut number_backslashes = 0usize;
-        while let Some('\\') = iterator.peek() {
-            iterator.next();
-            number_backslashes += 1;
-        }
-
-        match iterator.next() {
-            Some(char) => {
-                if char == '"' {
-                    //
-                    // Escape all backslashes and the following
-                    // double quotation mark.
-                    //
-                    append_copies(&mut result, '\\', number_backslashes * 2 + 1);
-                    result.push(char);
-                } else {
-                    //
-                    // Backslashes aren't special here.
-                    //
-                    append_copies(&mut result, '\\', number_backslashes);
-                    result.push(char);
-                }
-            }
-            None => {
-                //
-                // Escape all backslashes, but let the terminating
-                // double quotation mark we add below be interpreted
-                // as a metacharacter.
-                //
-                append_copies(&mut result, '\\', number_backslashes * 2);
-                break;
-            }
-        }
-    }
-
-    result.push('"');
-
-    result.into_iter().collect()
-}
-
-fn append_copies<T: Copy>(vector: &mut Vec<T>, value: T, count: usize) {
-    vector.reserve(count);
-    for _ in 0..count {
-        vector.push(value);
     }
 }
 
