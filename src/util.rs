@@ -1,10 +1,14 @@
-use std::convert::TryInto;
+use std::{
+    convert::TryInto,
+    error::Error,
+    ffi::{OsStr, OsString},
+};
 
 use bindings::Windows::Win32::{
     System::{
         Diagnostics::Debug::FACILITY_NT_BIT,
         Memory::LocalFree,
-        SystemServices::{NTSTATUS, VER_GREATER_EQUAL},
+        SystemServices::{NTSTATUS, PWSTR, VER_GREATER_EQUAL},
         WindowsProgramming::{
             VerSetConditionMask, VerifyVersionInfoW, OSVERSIONINFOEXW, VER_MAJORVERSION,
             VER_MINORVERSION, VER_SERVICEPACKMAJOR,
@@ -12,7 +16,7 @@ use bindings::Windows::Win32::{
     },
     UI::Shell::CommandLineToArgvW,
 };
-use widestring::U16CStr;
+use widestring::{U16CStr, U16CString};
 use windows::HRESULT;
 
 pub fn nt_success(status: NTSTATUS) -> bool {
@@ -57,20 +61,26 @@ fn is_windows_version_or_greater(
     }
 }
 
-pub fn command_line_to_argv(command_line: impl AsRef<str>) -> windows::Result<Vec<String>> {
+pub fn command_line_to_argv(
+    command_line: impl AsRef<OsStr>,
+) -> Result<Vec<OsString>, Box<dyn Error>> {
     unsafe {
+        let command_line = U16CString::from_os_str(command_line)?;
+        let mut command_line = command_line.into_vec_with_nul();
+
         let mut argc = 0;
-        let argv = CommandLineToArgvW(command_line.as_ref(), &mut argc);
+        let argv = CommandLineToArgvW(PWSTR(command_line.as_mut_ptr()), &mut argc);
         if argv.is_null() {
-            return Err(windows::Error::from(HRESULT::from_thread()));
+            return Err(windows::Error::from(HRESULT::from_thread()))?;
         }
 
-        let argv_slice = std::slice::from_raw_parts(argv, argc.try_into().unwrap());
-
-        let result = argv_slice
-            .iter()
-            .map(|argument_ptr| U16CStr::from_ptr_str(argument_ptr.0).to_string().unwrap())
-            .collect();
+        let result = {
+            let argv_slice = std::slice::from_raw_parts(argv, argc.try_into().unwrap());
+            argv_slice
+                .iter()
+                .map(|argument_ptr| U16CStr::from_ptr_str(argument_ptr.0).to_os_string())
+                .collect()
+        };
 
         LocalFree(argv as _);
 

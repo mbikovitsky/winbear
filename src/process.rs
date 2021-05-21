@@ -1,4 +1,7 @@
-use std::{collections::HashMap, convert::TryInto, error::Error};
+use std::{
+    collections::HashMap, convert::TryInto, error::Error, ffi::OsString,
+    os::windows::ffi::OsStringExt, path::PathBuf,
+};
 
 use bindings::Windows::Win32::System::{
     Diagnostics::Debug::{GetLastError, ReadProcessMemory, ERROR_INSUFFICIENT_BUFFER},
@@ -42,7 +45,7 @@ impl Process {
         unsafe { TerminateProcess(self.handle, exit_code).ok() }
     }
 
-    pub fn image_name(&self) -> Result<String, Box<dyn Error>> {
+    pub fn image_name(&self) -> Result<PathBuf, Box<dyn Error>> {
         let mut result = vec![0];
         loop {
             unsafe {
@@ -61,8 +64,8 @@ impl Process {
                 if success.as_bool() {
                     let name = result.as_slice();
                     let name = &name[..size as usize];
-                    let name = String::from_utf16(name)?;
-                    return Ok(name);
+                    let name = OsString::from_wide(name);
+                    return Ok(name.into());
                 }
 
                 result.resize(result.len() * 2, 0);
@@ -70,44 +73,38 @@ impl Process {
         }
     }
 
-    pub fn command_line(&self) -> Result<String, Box<dyn Error>> {
+    pub fn command_line(&self) -> Result<OsString, Box<dyn Error>> {
         let params = self.native_process_parameters()?;
 
         Ok(self.read_unicode_string(&params.CommandLine)?)
     }
 
-    pub fn environment(&self) -> Result<HashMap<String, String>, Box<dyn Error>> {
+    pub fn environment(&self) -> Result<EnvironmentBlock, Box<dyn Error>> {
         let params = self.native_process_parameters()?;
 
-        let environment_block = unsafe {
-            let mut environment_block_bytes = vec![0; params.EnvironmentSize.try_into().unwrap()];
-            self.read_memory(
+        let environment_block_size: usize = params.EnvironmentSize.try_into().unwrap();
+
+        let mut environment_block_chars =
+            vec![0u16; environment_block_size / std::mem::size_of::<u16>()];
+
+        unsafe {
+            self.read_slice(
                 params.Environment.try_into().unwrap(),
-                &mut environment_block_bytes,
+                &mut environment_block_chars,
             )?;
+        }
 
-            let environment_block_slice: &[u16] = std::slice::from_raw_parts(
-                environment_block_bytes.as_ptr() as _,
-                environment_block_bytes.len() / std::mem::size_of::<u16>(),
-            );
-
-            String::from_utf16(environment_block_slice)?
-        };
-
-        let environment = environment_block
-            .split('\0')
-            .take_while(|pair_string| !pair_string.is_empty())
-            .filter_map(|pair_string| pair_string.split_once('='))
-            .map(|(name, value)| (name.to_string(), value.to_string()))
-            .collect();
-
-        Ok(environment)
+        Ok(EnvironmentBlock {
+            data: environment_block_chars,
+        })
     }
 
-    pub fn current_directory(&self) -> Result<String, Box<dyn Error>> {
+    pub fn current_directory(&self) -> Result<PathBuf, Box<dyn Error>> {
         let params = self.native_process_parameters()?;
 
-        Ok(self.read_unicode_string(&params.CurrentDirectory.DosPath)?)
+        Ok(self
+            .read_unicode_string(&params.CurrentDirectory.DosPath)?
+            .into())
     }
 
     fn native_process_parameters(&self) -> Result<RTL_USER_PROCESS_PARAMETERS64, Box<dyn Error>> {
@@ -183,18 +180,28 @@ impl Process {
         Ok(ptr.read_unaligned())
     }
 
-    fn read_unicode_string(&self, string: &UNICODE_STRING64) -> Result<String, Box<dyn Error>> {
-        let mut string_bytes = vec![0; string.Length.into()];
-        self.read_memory(string.Buffer.try_into().unwrap(), &mut string_bytes)?;
+    unsafe fn read_slice<T: Copy>(
+        &self,
+        base_address: usize,
+        output: &mut [T],
+    ) -> windows::Result<()> {
+        let buffer = std::slice::from_raw_parts_mut(
+            output.as_mut_ptr() as _,
+            output.len() * std::mem::size_of::<T>(),
+        );
+        return self.read_memory(base_address, buffer);
+    }
 
-        let string_chars = unsafe {
-            std::slice::from_raw_parts::<u16>(
-                string_bytes.as_ptr() as _,
-                string_bytes.len() / std::mem::size_of::<u16>(),
-            )
-        };
+    fn read_unicode_string(&self, string: &UNICODE_STRING64) -> Result<OsString, Box<dyn Error>> {
+        let string_size: usize = string.Length.into();
 
-        Ok(String::from_utf16(string_chars)?)
+        let mut string_chars = vec![0u16; string_size / std::mem::size_of::<u16>()];
+
+        unsafe {
+            self.read_slice(string.Buffer.try_into().unwrap(), &mut string_chars)?;
+        }
+
+        Ok(OsString::from_wide(&string_chars))
     }
 
     pub fn process_id(&self) -> u32 {
@@ -223,6 +230,36 @@ impl Drop for Process {
         unsafe {
             CloseHandle(self.handle).ok().unwrap();
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EnvironmentBlock {
+    data: Vec<u16>,
+}
+
+impl EnvironmentBlock {
+    pub fn iter(&self) -> impl Iterator<Item = (OsString, OsString)> + '_ {
+        self.data
+            .split(|c| *c == 0)
+            .take_while(|variable_data| !variable_data.is_empty())
+            .filter_map(|variable_data| {
+                if let Some(separator_position) =
+                    variable_data.iter().position(|c| *c == 61 /* = */)
+                {
+                    let (name, value) = variable_data.split_at(separator_position);
+                    let value = &value[1..];
+                    Some((OsString::from_wide(name), OsString::from_wide(value)))
+                } else {
+                    None
+                }
+            })
+    }
+}
+
+impl<'a> From<&'a EnvironmentBlock> for HashMap<OsString, OsString> {
+    fn from(block: &'a EnvironmentBlock) -> Self {
+        block.iter().collect()
     }
 }
 
@@ -441,7 +478,13 @@ fn append_copies<T: Copy>(vector: &mut Vec<T>, value: T, count: usize) {
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::TryInto, env, fs};
+    use std::{
+        collections::HashMap,
+        convert::TryInto,
+        env,
+        ffi::{OsStr, OsString},
+        fs,
+    };
 
     use bindings::Windows::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
 
@@ -537,8 +580,9 @@ mod tests {
             .unwrap();
 
         let read_env_block = process.environment().unwrap();
+        let read_env_block: HashMap<OsString, OsString> = read_env_block.into();
 
-        assert_eq!(value, read_env_block.get(variable).unwrap());
+        assert_eq!(value, read_env_block.get(OsStr::new(variable)).unwrap());
 
         process.terminate(-1i32 as _).unwrap();
 

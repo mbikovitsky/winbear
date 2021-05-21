@@ -1,6 +1,8 @@
 use std::{
     collections::{BTreeMap, HashMap},
     error::Error,
+    ffi::OsString,
+    path::PathBuf,
     time::SystemTime,
 };
 
@@ -10,7 +12,7 @@ use bindings::Windows::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PRO
 
 use crate::{
     debugger::{run_debug_loop, DebugEvent, DebugEventHandler, DebugEventInfo, DebugEventResponse},
-    process::{Process, ProcessCreator},
+    process::{EnvironmentBlock, Process, ProcessCreator},
     util::command_line_to_argv,
 };
 
@@ -72,15 +74,34 @@ impl ExecutionLogger {
                     })
                     .collect();
 
+                let arguments: Vec<String> = execution
+                    .command
+                    .arguments
+                    .iter()
+                    .map(|arg| arg.to_string_lossy().to_string())
+                    .collect();
+
+                let environment: HashMap<String, String> = execution
+                    .command
+                    .environment
+                    .iter()
+                    .map(|(key, value)| {
+                        (
+                            key.to_string_lossy().to_string(),
+                            value.to_string_lossy().to_string(),
+                        )
+                    })
+                    .collect();
+
                 object! {
                     "command": {
-                        "arguments": execution.command.arguments.as_slice(),
-                        "environment": execution.command.environment.clone(),
-                        "program": execution.command.program.as_str(),
-                        "working_dir": execution.command.working_dir.as_str(),
+                        "arguments": arguments,
+                        "environment": environment,
+                        "program": execution.command.program.to_string_lossy().as_ref(),
+                        "working_dir": execution.command.working_dir.to_string_lossy().as_ref(),
                     },
                     "run": {
-                        "events": events.as_slice(),
+                        "events": events,
                         "pid": execution.run.pid,
                         "ppid": execution.run.ppid,
                     }
@@ -105,7 +126,7 @@ impl ExecutionLogger {
         let execution = Execution {
             command: Command {
                 program: process.image_name()?,
-                arguments: command_line_to_argv(process.command_line()?)?,
+                arguments: command_line_to_argv(&process.command_line()?)?,
                 environment: process.environment()?,
                 working_dir: process.current_directory()?,
             },
@@ -190,10 +211,10 @@ pub struct Execution {
 
 #[derive(Debug, Clone)]
 pub struct Command {
-    pub program: String,
-    pub arguments: Vec<String>,
-    pub environment: HashMap<String, String>,
-    pub working_dir: String,
+    pub program: PathBuf,
+    pub arguments: Vec<OsString>,
+    pub environment: EnvironmentBlock,
+    pub working_dir: PathBuf,
 }
 
 #[derive(Debug, Clone)]
