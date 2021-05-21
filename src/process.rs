@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap, convert::TryInto, error::Error, ffi::OsString,
+    collections::HashMap, convert::TryInto, error::Error, ffi::OsString, fmt::Debug,
     os::windows::ffi::OsStringExt, path::PathBuf,
 };
 
@@ -238,7 +238,7 @@ impl Drop for Process {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct EnvironmentBlock {
     data: Vec<u16>,
 }
@@ -265,6 +265,13 @@ impl EnvironmentBlock {
 impl<'a> From<&'a EnvironmentBlock> for HashMap<OsString, OsString> {
     fn from(block: &'a EnvironmentBlock) -> Self {
         block.iter().collect()
+    }
+}
+
+impl Debug for EnvironmentBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let map: HashMap<OsString, OsString> = self.into();
+        return map.fmt(f);
     }
 }
 
