@@ -262,6 +262,12 @@ impl EnvironmentBlock {
     }
 }
 
+impl From<EnvironmentBlock> for HashMap<OsString, OsString> {
+    fn from(block: EnvironmentBlock) -> Self {
+        Self::from(&block)
+    }
+}
+
 impl<'a> From<&'a EnvironmentBlock> for HashMap<OsString, OsString> {
     fn from(block: &'a EnvironmentBlock) -> Self {
         block.iter().collect()
