@@ -19,7 +19,7 @@
    along with winbear.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::{collections::HashSet, error::Error, ffi::OsString, path::PathBuf};
+use std::{error::Error, ffi::OsString, path::PathBuf};
 
 use bindings::Windows::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
 
@@ -32,22 +32,25 @@ use crate::{
 };
 
 pub struct ExecutionLogger {
-    extant_processes: HashSet<u32>,
     executions: Vec<ExecutionInfo>,
+    main_pid: Option<u32>,
 }
 
 impl ExecutionLogger {
     pub fn new() -> Self {
         Self {
-            extant_processes: HashSet::new(),
             executions: Vec::new(),
+            main_pid: None,
         }
     }
 
     pub fn log(&mut self, process_creator: &ProcessCreator) -> Result<(), Box<dyn Error>> {
-        process_creator.clone().debug(true).create()?;
+        let main_pid = process_creator.clone().debug(true).create()?.process_id();
 
-        run_debug_loop(self, None)?;
+        self.main_pid = Some(main_pid);
+        let result = run_debug_loop(self, None);
+        self.main_pid = None;
+        result?;
 
         Ok(())
     }
@@ -69,19 +72,8 @@ impl ExecutionLogger {
         };
 
         self.executions.push(execution);
-        let inserted = self.extant_processes.insert(process_id);
-        assert!(inserted);
 
         Ok(())
-    }
-
-    fn finish_execution(&mut self, process_id: u32) {
-        let removed = self.extant_processes.remove(&process_id);
-        assert!(removed);
-    }
-
-    fn is_done(&self) -> bool {
-        self.extant_processes.is_empty()
     }
 }
 
@@ -97,9 +89,7 @@ impl DebugEventHandler for ExecutionLogger {
                 return DebugEventResponse::Continue(ExceptionContinuation::NotHandled);
             }
             DebugEventInfo::ExitProcess(_) => {
-                self.finish_execution(event.process_id());
-
-                if self.is_done() {
+                if event.process_id() == self.main_pid.unwrap() {
                     return DebugEventResponse::ExitDetach(ExceptionContinuation::NotHandled);
                 }
 
