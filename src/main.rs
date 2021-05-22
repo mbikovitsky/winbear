@@ -22,9 +22,18 @@
 #[macro_use]
 extern crate static_assertions;
 
-use std::{error::Error, str::FromStr};
+use std::{borrow::Borrow, error::Error, fs, path::Path, str::FromStr};
 
 use clap::{crate_authors, crate_name, crate_version, App, Arg};
+use log::warn;
+
+use citnames::{
+    configuration::{Compilation, Content, Format},
+    output::CompilationDatabase,
+    semantic::Build,
+    Execution, Run,
+};
+use util::command_line_to_argv;
 
 use execution_logger::ExecutionLogger;
 use process::ProcessCreator;
@@ -104,9 +113,75 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let output = args.value_of("output").unwrap_or("compile_commands.json");
 
+    let runs = log_executions(&command)?;
+
+    build_compilation_database(&runs, output)?;
+
+    Ok(())
+}
+
+fn log_executions<I>(command: I) -> Result<Vec<Run>, Box<dyn Error>>
+where
+    I: IntoIterator,
+    I::Item: AsRef<str>,
+{
     let mut logger = ExecutionLogger::new();
 
-    logger.log(&ProcessCreator::new_with_arguments(&command, false))?;
+    logger.log(&ProcessCreator::new_with_arguments(command, false))?;
+
+    let runs: Vec<_> = logger
+        .executions()
+        .iter()
+        .filter_map(|info| match command_line_to_argv(&info.command_line) {
+            Ok(arguments) => Some(Run {
+                execution: Execution {
+                    executable: info.executable.clone(),
+                    arguments: arguments
+                        .into_iter()
+                        .map(|arg| arg.to_string_lossy().into_owned())
+                        .collect(),
+                    working_dir: info.working_dir.clone(),
+                    environment: (&info.environment).into(),
+                },
+                pid: info.pid,
+                ppid: info.ppid,
+            }),
+            Err(error) => {
+                warn!("Command-line parsing failed: {}", error);
+                None
+            }
+        })
+        .collect();
+
+    Ok(runs)
+}
+
+fn build_compilation_database<I>(runs: I, output: impl AsRef<Path>) -> Result<(), Box<dyn Error>>
+where
+    I: IntoIterator,
+    I::Item: Borrow<Run>,
+{
+    let database = CompilationDatabase::new(
+        Format {
+            command_as_array: true,
+            drop_output_field: false,
+        },
+        Content::default(),
+    );
+
+    let build = Build::new(Compilation::default());
+
+    let entries: Vec<_> = runs
+        .into_iter()
+        .filter_map(|run| build.recognize(run.borrow()).ok())
+        .filter_map(|semantic| semantic)
+        .filter_map(|semantic| semantic.into_entries())
+        .flatten()
+        .collect();
+
+    let serialized_database = database.to_json(&entries)?;
+
+    fs::write(output, serialized_database.as_bytes())?;
 
     Ok(())
 }
