@@ -34,6 +34,7 @@ use bindings::Windows::Win32::System::{
     SystemServices::{DBG_CONTINUE, DBG_EXCEPTION_NOT_HANDLED, HANDLE},
     WindowsProgramming::{CloseHandle, INFINITE},
 };
+use log::warn;
 
 pub trait DebugEventHandler {
     fn handle_event(&mut self, event: &DebugEvent) -> DebugEventResponse;
@@ -162,8 +163,7 @@ pub fn run_debug_loop(
                 for pid in debugged_processes {
                     let result = unsafe { DebugActiveProcessStop(pid).ok() };
                     if let Err(error) = result {
-                        // TODO: better logging
-                        eprintln!("{}", error);
+                        warn!("Failed detaching from PID {}: {}", pid, error);
                     }
                 }
                 return Ok(());

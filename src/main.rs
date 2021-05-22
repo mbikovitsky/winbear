@@ -22,7 +22,7 @@
 #[macro_use]
 extern crate static_assertions;
 
-use std::error::Error;
+use std::{error::Error, str::FromStr};
 
 use clap::{crate_authors, crate_name, crate_version, App, Arg};
 
@@ -40,6 +40,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         .about("Creates compile_commands.json from uncooperating build systems")
         .setting(clap::AppSettings::TrailingVarArg)
         .arg(
+            Arg::with_name("verbosity")
+                .short("v")
+                .multiple(true)
+                .help("Increase message verbosity"),
+        )
+        .arg(
+            Arg::with_name("quiet")
+                .short("q")
+                .help("Silence all output"),
+        )
+        .arg(
+            Arg::with_name("timestamp")
+                .short("t")
+                .help("Prepend log lines with a timestamp")
+                .takes_value(true)
+                .possible_values(&["none", "sec", "ms", "ns"]),
+        )
+        .arg(
             Arg::with_name("output")
                 .short("o")
                 .long("output")
@@ -54,6 +72,33 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .help("Command to run"),
         )
         .get_matches();
+
+    let verbose = args.occurrences_of("verbosity") as usize;
+    let quiet = args.is_present("quiet");
+    let ts = args
+        .value_of("timestamp")
+        .map(|v| {
+            stderrlog::Timestamp::from_str(v).unwrap_or_else(|_| {
+                clap::Error {
+                    message: "invalid value for 'timestamp'".into(),
+                    kind: clap::ErrorKind::InvalidValue,
+                    info: None,
+                }
+                .exit()
+            })
+        })
+        .unwrap_or(stderrlog::Timestamp::Off);
+
+    stderrlog::new()
+        .module(module_path!())
+        .module("citnames")
+        .module("util")
+        .quiet(quiet)
+        .verbosity(verbose)
+        .timestamp(ts)
+        .show_module_names(true)
+        .init()
+        .unwrap();
 
     let command: Vec<_> = args.values_of("COMMAND").unwrap().collect();
 

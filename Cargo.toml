@@ -15,5 +15,7 @@ util = { path = "util" }
 
 static_assertions = "1.1.0"
 clap = "2.33.3"
+log = "0.4"
+stderrlog = "0.5.1"
 
 [workspace]

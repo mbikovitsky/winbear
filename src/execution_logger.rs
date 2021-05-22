@@ -22,6 +22,7 @@
 use std::{error::Error, ffi::OsString, path::PathBuf};
 
 use bindings::Windows::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+use log::warn;
 
 use crate::{
     debugger::{
@@ -82,8 +83,7 @@ impl DebugEventHandler for ExecutionLogger {
         match event.info() {
             DebugEventInfo::CreateProcess(_) => {
                 if let Err(error) = self.add_execution(event.process_id()) {
-                    // TODO: better logging
-                    eprintln!("{}", error);
+                    warn!("Failed adding execution: {}", error);
                 }
 
                 return DebugEventResponse::Continue(ExceptionContinuation::NotHandled);
