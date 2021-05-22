@@ -14,8 +14,6 @@ citnames = { path = "citnames" }
 util = { path = "util" }
 
 static_assertions = "1.1.0"
-json = "0.12.4"
-chrono = "0.4"
 clap = "2.33.3"
 
 [workspace]

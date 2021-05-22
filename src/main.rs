@@ -22,9 +22,6 @@
 #[macro_use]
 extern crate static_assertions;
 
-#[macro_use]
-extern crate json;
-
 use std::error::Error;
 
 use clap::{crate_authors, crate_name, crate_version, App, Arg};
