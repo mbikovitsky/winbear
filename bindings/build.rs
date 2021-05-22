@@ -29,6 +29,7 @@ fn main() {
             WaitForDebugEvent,
             ContinueDebugEvent,
             ReadProcessMemory,
+            DebugActiveProcessStop,
 
             FACILITY_NT_BIT,
 

@@ -24,7 +24,10 @@ use std::{collections::HashSet, error::Error, ffi::OsString, path::PathBuf};
 use bindings::Windows::Win32::System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
 
 use crate::{
-    debugger::{run_debug_loop, DebugEvent, DebugEventHandler, DebugEventInfo, DebugEventResponse},
+    debugger::{
+        run_debug_loop, DebugEvent, DebugEventHandler, DebugEventInfo, DebugEventResponse,
+        ExceptionContinuation,
+    },
     process::{EnvironmentBlock, Process, ProcessCreator},
 };
 
@@ -91,19 +94,19 @@ impl DebugEventHandler for ExecutionLogger {
                     eprintln!("{}", error);
                 }
 
-                return DebugEventResponse::ExceptionNotHandled;
+                return DebugEventResponse::Continue(ExceptionContinuation::NotHandled);
             }
             DebugEventInfo::ExitProcess(_) => {
                 self.finish_execution(event.process_id());
 
                 if self.is_done() {
-                    return DebugEventResponse::ExitExceptionNotHandled;
+                    return DebugEventResponse::ExitDetach(ExceptionContinuation::NotHandled);
                 }
 
-                return DebugEventResponse::ExceptionNotHandled;
+                return DebugEventResponse::Continue(ExceptionContinuation::NotHandled);
             }
             _ => {
-                return DebugEventResponse::ExceptionNotHandled;
+                return DebugEventResponse::Continue(ExceptionContinuation::NotHandled);
             }
         }
     }

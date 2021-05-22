@@ -19,9 +19,11 @@
    along with winbear.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+use std::collections::HashSet;
+
 use bindings::Windows::Win32::System::{
     Diagnostics::Debug::{
-        ContinueDebugEvent, WaitForDebugEvent, CREATE_PROCESS_DEBUG_EVENT,
+        ContinueDebugEvent, DebugActiveProcessStop, WaitForDebugEvent, CREATE_PROCESS_DEBUG_EVENT,
         CREATE_PROCESS_DEBUG_INFO, CREATE_THREAD_DEBUG_EVENT, CREATE_THREAD_DEBUG_INFO,
         EXCEPTION_DEBUG_EVENT, EXCEPTION_DEBUG_INFO, EXIT_PROCESS_DEBUG_EVENT,
         EXIT_PROCESS_DEBUG_INFO, EXIT_THREAD_DEBUG_EVENT, EXIT_THREAD_DEBUG_INFO,
@@ -37,11 +39,17 @@ pub trait DebugEventHandler {
     fn handle_event(&mut self, event: &DebugEvent) -> DebugEventResponse;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DebugEventResponse {
-    ExceptionHandled,
-    ExceptionNotHandled,
-    ExitExceptionHandled,
-    ExitExceptionNotHandled,
+    Continue(ExceptionContinuation),
+    ExitDetach(ExceptionContinuation),
+    Exit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExceptionContinuation {
+    Handled,
+    NotHandled,
 }
 
 #[derive(Debug)]
@@ -122,19 +130,45 @@ pub fn run_debug_loop(
     handler: &mut impl DebugEventHandler,
     timeout_ms: Option<u32>,
 ) -> windows::Result<()> {
+    let mut debugged_processes = HashSet::new();
+
     loop {
         let debug_event = wait_for_debug_event(timeout_ms)?;
 
-        match handler.handle_event(&debug_event) {
-            DebugEventResponse::ExceptionHandled => debug_event.continue_event(true)?,
-            DebugEventResponse::ExceptionNotHandled => debug_event.continue_event(false)?,
+        match debug_event.info() {
+            DebugEventInfo::CreateProcess(_) => {
+                let inserted = debugged_processes.insert(debug_event.process_id());
+                assert!(inserted);
+            }
+            DebugEventInfo::ExitProcess(_) => {
+                let removed = debugged_processes.remove(&debug_event.process_id());
+                assert!(removed);
+            }
+            _ => {}
+        }
 
-            DebugEventResponse::ExitExceptionHandled => {
+        match handler.handle_event(&debug_event) {
+            DebugEventResponse::Continue(ExceptionContinuation::Handled) => {
                 debug_event.continue_event(true)?;
+            }
+            DebugEventResponse::Continue(ExceptionContinuation::NotHandled) => {
+                debug_event.continue_event(false)?;
+            }
+            DebugEventResponse::ExitDetach(continuation) => {
+                match continuation {
+                    ExceptionContinuation::Handled => debug_event.continue_event(true)?,
+                    ExceptionContinuation::NotHandled => debug_event.continue_event(false)?,
+                }
+                for pid in debugged_processes {
+                    let result = unsafe { DebugActiveProcessStop(pid).ok() };
+                    if let Err(error) = result {
+                        // TODO: better logging
+                        eprintln!("{}", error);
+                    }
+                }
                 return Ok(());
             }
-            DebugEventResponse::ExitExceptionNotHandled => {
-                debug_event.continue_event(false)?;
+            DebugEventResponse::Exit => {
                 return Ok(());
             }
         }
