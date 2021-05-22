@@ -67,6 +67,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .possible_values(&["none", "sec", "ms", "ns"]),
         )
         .arg(
+            Arg::with_name("append")
+                .short("a")
+                .long("append")
+                .help("Use previously generated output file and append the new entries to it"),
+        )
+        .arg(
             Arg::with_name("output")
                 .short("o")
                 .long("output")
@@ -111,11 +117,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let command: Vec<_> = args.values_of("COMMAND").unwrap().collect();
 
+    let append = args.is_present("append");
+
     let output = args.value_of("output").unwrap_or("compile_commands.json");
 
     let runs = log_executions(&command)?;
 
-    build_compilation_database(&runs, output)?;
+    build_compilation_database(&runs, output, append)?;
 
     Ok(())
 }
@@ -156,7 +164,11 @@ where
     Ok(runs)
 }
 
-fn build_compilation_database<I>(runs: I, output: impl AsRef<Path>) -> Result<(), Box<dyn Error>>
+fn build_compilation_database<I>(
+    runs: I,
+    database_path: impl AsRef<Path>,
+    append: bool,
+) -> Result<(), Box<dyn Error>>
 where
     I: IntoIterator,
     I::Item: Borrow<Run>,
@@ -171,17 +183,25 @@ where
 
     let build = Build::new(Compilation::default());
 
-    let entries: Vec<_> = runs
-        .into_iter()
-        .filter_map(|run| build.recognize(run.borrow()).ok())
-        .filter_map(|semantic| semantic)
-        .filter_map(|semantic| semantic.into_entries())
-        .flatten()
-        .collect();
+    let mut entries = if append {
+        database.from_json_file(database_path.as_ref())?
+    } else {
+        vec![]
+    };
 
-    let serialized_database = database.to_json(&entries)?;
+    {
+        let mut new_entries: Vec<_> = runs
+            .into_iter()
+            .filter_map(|run| build.recognize(run.borrow()).ok())
+            .filter_map(|semantic| semantic)
+            .filter_map(|semantic| semantic.into_entries())
+            .flatten()
+            .collect();
 
-    fs::write(output, serialized_database.as_bytes())?;
+        entries.append(&mut new_entries);
+    }
+
+    database.to_json_file(&entries, database_path)?;
 
     Ok(())
 }

@@ -25,6 +25,7 @@ use std::{
     collections::{hash_map::DefaultHasher, HashSet},
     convert::TryFrom,
     error::Error,
+    fs,
     hash::{Hash, Hasher},
     path::Path,
 };
@@ -79,6 +80,16 @@ impl CompilationDatabase {
         Ok(serde_json::to_string_pretty(&filtered)?)
     }
 
+    pub fn to_json_file<'a>(
+        &self,
+        entries: impl IntoIterator<Item = &'a Entry>,
+        path: impl AsRef<Path>,
+    ) -> Result<(), Box<dyn Error>> {
+        let json = self.to_json(entries)?;
+        fs::write(path, json.as_bytes())?;
+        Ok(())
+    }
+
     pub fn from_json(&self, input: impl AsRef<str>) -> Result<Vec<Entry>, Box<dyn Error>> {
         let result: Vec<SerializableEntry> = serde_json::from_str(input.as_ref())?;
         let result: Result<Vec<Entry>, _> = result.into_iter().map(Entry::try_from).collect();
@@ -102,6 +113,12 @@ impl CompilationDatabase {
         }
 
         Ok(result)
+    }
+
+    pub fn from_json_file(&self, path: impl AsRef<Path>) -> Result<Vec<Entry>, Box<dyn Error>> {
+        let database = fs::read(path)?;
+        let database = String::from_utf8(database)?;
+        self.from_json(database)
     }
 }
 
