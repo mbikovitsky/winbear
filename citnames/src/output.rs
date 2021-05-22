@@ -106,23 +106,23 @@ impl CompilationDatabase {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SerializableEntry<'a> {
+struct SerializableEntry<'a, 'b, 'c, 'd> {
     #[serde(borrow)]
     pub file: Cow<'a, str>,
 
     #[serde(borrow)]
-    pub directory: Cow<'a, str>,
+    pub directory: Cow<'b, str>,
 
     #[serde(borrow)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<Cow<'a, str>>,
+    pub output: Option<Cow<'c, str>>,
 
     #[serde(borrow)]
     #[serde(flatten)]
-    pub arguments: SerializableArguments<'a>,
+    pub arguments: SerializableArguments<'d>,
 }
 
-impl<'a> From<&'a Entry> for SerializableEntry<'a> {
+impl<'a> From<&'a Entry> for SerializableEntry<'a, 'a, 'a, 'a> {
     fn from(entry: &'a Entry) -> Self {
         Self {
             file: entry.file.to_string_lossy(),
@@ -139,10 +139,10 @@ impl<'a> From<&'a Entry> for SerializableEntry<'a> {
     }
 }
 
-impl<'a> TryFrom<SerializableEntry<'a>> for Entry {
+impl<'a, 'b, 'c, 'd> TryFrom<SerializableEntry<'a, 'b, 'c, 'd>> for Entry {
     type Error = Box<dyn Error>;
 
-    fn try_from(entry: SerializableEntry<'a>) -> Result<Self, Self::Error> {
+    fn try_from(entry: SerializableEntry<'a, 'b, 'c, 'd>) -> Result<Self, Self::Error> {
         Ok(Self {
             file: entry.file.into_owned().into(),
             directory: entry.directory.into_owned().into(),
